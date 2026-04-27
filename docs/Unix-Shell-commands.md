@@ -416,3 +416,260 @@ drwxr-xr-x  2 jhparkk1023 jhparkk1023  4096 Mar  6 16:32 test
     - File 'smallest' has rw- permission for the user. We change the permission to rwx using chmod.
     - ./smallest means that in the current directory '.', there is a file name 'smallest' and we execute the file. 
     
+# 5. Finding Things
+
+command|decription
+---|---
+grep|global / regular expression / print
+find|find file
+
+* grep: group / regular expression / print
+    - Finds and prints lines in files that match a pattern. 
+
+    ```bash
+    $ grep thee eric.txt
+    How do I love thee? Let me count the ways.
+    I love thee to the depth and breadth and height
+    I love thee to the level of every day’s
+    I love thee freely, as men strive for right.
+    I love thee purely, as they turn from praise.
+    I love thee with the passion put to use
+    I love thee with a love I seemed to lose
+    With my lost saints. I love thee with the breath,
+    I shall but love thee better after death.
+    ```
+
+    - 'grep' finds the pattern with 'thee' and prints lines that have such pattern in line in eric.txt file.
+
+    ```bash
+    $ grep ly eric.txt
+    I love thee freely, as men strive for right.
+    I love thee purely, as they turn from praise.
+    ``` 
+
+    - 'grep' finds pattern that has 'ly'.rn
+
+    ```bash
+    $ grep -n ly eric.txt
+    7:I love thee freely, as men strive for right.
+    8:I love thee purely, as they turn from praise.
+    
+    ```
+    - The default is printing line. -w for the whole word (ex: grep -w day [file] -> this day is great! [O], erverday is great![X]) and -n for which line has the patten
+    - -i: case insensitive
+    - -v: invert and print non-matches.
+
+- find: finds files (rather than lines in files)
+
+    ```bash
+    $ find . -type d
+    [directories list]
+    ```
+
+    - . means root directory. This commands finds directory that is in the root directory.
+
+    ```bash
+    $ find . -maxdepth 1 -type d
+    [directories list]
+    ```
+
+    - Find all directories that are in maxdepth 1 in root directories.
+
+    ```bash
+    $ find . -empty
+    [empty directories list]
+    ``` 
+
+    - Find all directories that are empty.
+
+    ```bash
+    $ find . -perm -u=x
+    [directories list with user permission 'x']
+    ```
+
+    - Finds directories and files that have exeucte user permission.
+
+    ```bash
+    $ find -name *.txt
+    [.txt files]
+    ```
+
+    - The shell expands *.txt to actual name txt file that is in root directory (depth = 1)before performing 'find' command.
+    ```bash
+    $ find -name '*.txt'
+    [all .txt files that are in root directories]
+    ```
+
+    - Single quotes prevent shell from expanding wildcards. This gets the pattern for 'find'.
+
+    ```bash
+    $ wc -l `find -name '*.txt'`
+      0 ./banana.txt
+      0 ./apple.txt
+     14 ./eric.txt
+     14 total
+     ```
+
+    - Back quotes replace what's inside with output from running that command.
+
+# 6. Job Control
+
+command|description
+---|---
+jobs|shows background processes
+bg|run on background
+fg|run on foreground
+kill|kill the process
+
+-  Can stop, pause, and resume running processes
+
+    ```bash
+    $ ./analyze results*.dat
+    ...a few minutes pass...
+    ^C
+    $ ./analyze results*.dat &
+    $ jobs
+    [1] ./analyze results01.dat results02.dat results03.dat
+    $ fg
+    ...a few minutes pass...
+    $ 
+    ```
+
+    - ./analyze results*.dat takes a few minutes to finish the job and the shell waits, preventing us from getting new prompt to command. So we ^C to stop the running program and type ./analyze results*.dat &. & means run in the background. Shell returns right away insead of waiting for the program to finish. 
+    - 'jobs' shows background processes
+    - fg, fg %1, fg %2.... bring background job to foreground. We use % if there are several background jobs.
+    - After the foreground jobs are finished, the prompt appears.
+
+    ```bash
+    $ ./analyze results01.dat
+    ^Z
+    [1] Stopped   ./analyze results01.dat
+    $ bg %1
+    $ jobs
+    [1] ./analyze results01.dat
+    $ kill %1
+    $
+    ```
+    - ^Z pauses a program that's already running.
+    - 'fg' to resume it in the foreground or 'bg' to resume it as a background job. 'kill %1' is same as stopping the foreground process using ^C.
+
+    - Job control mattered a lot when users only had one terminal window.
+    - Less important now: just open another window.
+    - Still useful when running programs remotely.  
+    - ^C stops the foreground process, 'kill' stops foreground or background process. ^Z pauses the foreground process
+
+# 7. Variables
+
+commands|description
+---|---
+set|show environment variables
+echo|print the value of variable
+export|variable is valid in subproc
+alias|register long commands to short ones
+
+- The shell is a program and has variables. The variables control the shell execution, and when we change their values, it is possible to change its behavior.
+
+- set: With no arguments, shows all the environment variable names and its value.
+    ```bash
+    $ set
+    BASH=/bin/bash
+    HOME=/home/jhparkk1023
+    PATH='/home/jhparkk1023/.opam/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/usr/lib/wsl/lib:/mnt/c/Program Files/WindowsApps/MicrosoftCorporationII.WindowsSubsystemForLinux_2.6.3.0_x64__8wekyb3d8bbwe:/mnt/c/app/jhpar/product/21c/dbhomeXE/bin:/mnt/c/WINDOWS/system32:/mnt/c/WINDOWS:/mnt/c/WINDOWS/System32/Wbem:/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/:/mnt/c/WINDOWS/System32/OpenSSH/:/mnt/c/Program Files/Git/cmd:/mnt/c/Program Files/Docker Machine:/mnt/c/minikube:/mnt/c/Program Files/Docker/Docker/resources/bin:/mnt/c/MinGW/bin:/mnt/c/Program Files (x86)/Windows Kits/10/Windows Performance Toolkit/:/mnt/c/Program Files/Bandizip/:/mnt/c/Users/jhpar/pilsaProject/jdk-17/bin:/mnt/c/Program Files/dotnet/:/mnt/c/Users/jhpar/AppData/Local/Microsoft/WindowsApps:/mnt/c/Users/jhpar/AppData/Local/Programs/Microsoft VS Code/bin:/mnt/c/Program Files/Docker Machine:/mnt/c/Users/jhpar/AppData/Local/GitHubDesktop/bin:/mnt/c/Program Files/JetBrains/IntelliJ IDEA 2025.3.1.1/bin:/mnt/c/Users/jhpar/pilsaProject/jdk-17/bin:/snap/bin'
+    PPID=15950
+    SHELL=/bin/bash
+    UID=1000
+    USER=jhparkk1023
+    ...
+    ```
+    - All variables are upper-case.
+    - All values are strings. Programs must convert to other types when/as necessary. Ex: In PPID=15950, 15950 is a string and must be converted into int.
+    - ":"is to split the string values.
+        - PATH controls where the shell looks for programs.
+        ```bash
+        $ ./analyze
+        ``` 
+        - ./analyze means to run the 'analyze' program in the current directory.
+        ```bash
+        $ /bin/analyze
+        ```
+        - Run the analyze program in the /bin directory. 
+        ```bash
+        $ analyze
+        ```
+        - The shell looks the variable PATH, and splits its value with ":". Then for each directory, if directory/analyze exists, the shell runs the program. 
+
+        ```
+        /usr/local/bin
+        /usr/bin
+        /bin                            /bin/analyze
+        /cygdrive/c/Windows/systems32   
+        /cygdrive/c/Windows
+        /cygdrive/c/bin                 /cygdrive/c/bin/analyze
+        /cygdrive/c/Python27
+                                        /users/vlad/analyze
+        ```
+        - Let's assume that PATH has value that is described above and the program 'analyze' is in 3 different directories. The shell looks the PATH variable to see if 'analyze' program is in the directories described above. It founds out that 'analyze' program is in /bin directory and runs the program. The program 'analyze' that is in /users/vlad directory will never be found by the shell who looks for the directory in PATH. 
+
+- echo
+    - echo prints its argurment. It can be used to print the value of variables. 
+
+    ```bash
+    $ echo hello
+    hello
+    $ echo HOME
+    HOME
+    $ echo $HOME
+    /home/jhparkk1023
+    ```
+    - $ asks shell to replace variable name with value before program runs just like * and ? are expanded before the program runs
+        - echo $HOME -> echo /home/jhparkk1023
+
+- Create variable by assigning to it and change values by reassiging to existing variables
+    ```bash
+    $ SECRET_VAR=Eric_Park
+    $ echo $SECRET_VAR
+    Eric_Park
+    ```
+
+    - Assignment only changes variable's value in the current shell that you are working on. 
+
+    ```bash
+    $ SECRET_VAR=Eric_Park
+    $ echo $SECRET_VAR
+    Eric_Park
+    $ bash
+    $ echo $SECRET_VAR
+
+    $ exit
+    exit
+    $ echo $SECRET_VAR
+    Eric_Park
+    ```
+
+    - The variable is not valid in other child process shell.
+
+- Use export to signal that the variable should be visible to subprocesses.
+
+    ```bash
+    $ export SECRET_VAR
+    $ bash
+    $ echo $SECRET_VAR
+    Eric_Park
+    $ exit
+    exit
+    $ 
+    ```
+
+- When we want to set some variables automaticlly everytime we run a shell, put the commands in $HOME/.bashrc and the commands will be executed when shell starts.
+    - ./bashrc file
+    ```
+    export SECRET_VAR=Eric_Park
+    export BACK_UP=$HOME/backup
+    ```
+
+- alias: This feature allows you to create short shortcuts for complex or long commands, typically registered in the ~/.bashrc or ~/.zshrc files for permanent use.
+    ```
+    alias backup=/bin/zarble -v --nostir -R 20000 $HOME $BACKUP_DIR
+    ```
+
+
