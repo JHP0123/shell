@@ -62,7 +62,6 @@ Step|Related Commands|Key System Calls and Learning Keywords
 
 ## simple blueprint
 <img src="../img/basic-commands.png" style="width: 80%;">
-![프로젝트 구조](../img/basic-commands.png)
 
 ### pseudo code for Basic Command
 
@@ -80,6 +79,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
                 full_path = dir + command_name
                 if (access(full_path, X_OK) == 0)
                     execve(full_path, argv, environ)
+                    break
                 dir = strtok(NULL, ":")
             }
             exit();
