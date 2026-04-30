@@ -3,7 +3,7 @@
 Step|Related Commands|Key System Calls and Learning Keywords
 ---|---|---
 1\. Basic Commmands|ls, mkdir, rm, mv, cp, cat, grep, wc, sort, head, nano|fork(), execve(), wait()
-2\. File I/O|>, <, pwd|open(), close(), dup2(), getcwd()
+2\. File I/O|>, <, pwd|fork(), open(), close(), dup2(), getcwd()
 3\. InterProcess Communicatoin|\||pipe(), I/O Redirection, IPC
 4\. Job Control|jobs, fg, bg, kill| signal, waitpid(), tcsetpgrp(), PGID
 5\. Shell Built-In Commands| cd, export, set, alias, *|chdir(), getenv(), setenv(), globbing
@@ -59,7 +59,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
 
 
     - **exit()**: The child process exits and signals the parent process. 
-        - 'void exit(int status)' call has two consants, EXIT_SUCCESS(0) and EXIT_FAILURE(1 or other), for input argument. 
+        - `void exit(int status)` call has two consants, EXIT_SUCCESS(0) and EXIT_FAILURE(1 or other), for input argument. 
 
 
 ### simple blueprint
@@ -180,5 +180,318 @@ Step|Related Commands|Key System Calls and Learning Keywords
 ---
 ### System Calls
 - File I/O and Redirection are a procedure that the shell and the __file__ communicate.
+- The key concept of this part is looking at how these system calls use File Descriptor and redirect them.
+
+    - `int open(const char *pathname, int flags) / int open(const char *pathname, int flags, mode_t mode);`
+        - open() gets pathname and returns a FD. This FD is then used by read, write, close system call. In success returns the lowest unused FD number, in failure returns -1 and set `errno`.
+        - Flags
+            1. Essential Flags
+            
+            Flag|meaning
+            ---|---
+            O_RDONLY|read only
+            O_WRONLY|write only
+            O_RDWR|read/write
+
+            2. File Creation Flags
+                - The flag creation flag affects the operation of open() call itself. It cannot be modified by `fcntl`.
+            
+            Flag|meaning
+            ---|---
+            O_CREATE|Create file if not exist.
+            O_TRUNC|If the file already exist and the access mode allows writing, it truancates the length to 0.
+            O_EXCL|It is used with O_CREATE and if the file already exists, outputs an error.
+            O_CLOEXEC|Close the fd automatically in the process when `execve` is called.
+
+            3. File Status Flag
+                - It decides the I/O operation at the opened file, and can be modified by `fcntl`.
+
+            Flag|meaning
+            ---|---
+            O_APPEND|When write, always put the data at the end of the file. Atomicity is guaranteed for this flag (move to the end + write data) at local file system so no race condition.
+            O_NONBLOCK|If there is no data to read, do not wait and immediately return. 
+            O_DIRECT|Do not go through OS cache but instead write to the Disk immediately.
+
+        - Modes
+            - Specifies the file mode bits to be applied when a new file is created. If neither O_CREATE or O_TMPFILE is specified in flags, then mode is ignored. 
+
+            Mode|meaning
+            ---|---
+            S_IRUSR|read user
+            S_IWUSR|write user
+            S_IXUSR|execute user
+            S_IRGRP|read group
+            S_IWGRP|write group
+            S_IXGRP|execute group
+            S_IROTH|read other
+            S_IWOTH|write other
+            S_IXOTH|execute other
+
+            - __umask__: The kernel filters permissions by applying a value called umask for system security.
+    
+    - `int dup(int oldfd);`
+    - `int dup2(int oldfd, int newfd)`
+        - The `dup` system call allocates a new file descriptor that refers to the same open file description as the descriptor __oldfd__. The new file descriptor number is guaranteed to be the lowest-numbered file descriptor that was unused in the calling process.
+        - After a successful return, the old and new file descriptors may be used interchangeably. Since these two refer to the same open file description, they share the file offset and file status flags. 
+        - The two file descriptors do not share file descriptor close-on-exec flags. The close-on-exec flag for the duplicate descriptor is off. 
+            - Ex
+
+            Stage|FD 3 (original)|FD 4 (Copied)|Note
+            ---|---|---|---
+            Right after `dup`|FD_CLOEXEC ON|FD_CLOEXEC OFF|When copied, thd file descriptor flags are not copied.
+            Call `execve`|Closed|Open (maintained)|The kernel cleans up FD 3.
+            New Program|Unaccessable|Accessable|The new program has FD 4 but not FD 3.
+
+            - Applied to Shell
+                - `ls > out.txt`: FD 3 is created. FD 3 has O_CLOEXEC flag for securiy reason.
+                - `dup2(3, 1)`: Now FD 1 __stdout__ is pointing to the same open file table entry as FD 3.
+                - If `dup2(3, 1)` duplicates FD 3's O_CLOEXEC flag to FD 1, when `execve` is executed FD 1 Standard Output is closed and `ls` would not be able to print the context anywhere.
+        - The `dup2` system call operates as same as the `dup` call, but the main difference is that instead of using the lowest-numbered unused file descriptor, it uses the file descriptor number specified in __newfd__. Now the __newfd__ is pointing to the same open file table entry as __oldfd__. 
+        - `dup2`'s Advantage
+            1. __Silent Close__: The kernel silently closes the oldfd. 'Silently' means when it closes oldfd, it does not inform any error to the user and just copies the newfd.
+            2. __Atomiciy__: "Closing the oldfd" procedure and then "Copying to newfd" is atomicity, which means no commands can come to the middle of the two procedure.
+            - __Race Condition__ when using `close()` and `dup()` instead of `dup2()`
+                ```C
+                close(1);
+                // <--- race condition can occur
+                newfd = dup(3);
+                ```
+
+                1. Thread A closes FD 1. Now FD 1 in the FD table is empty.
+                2. Right after Thread A's `close(1)` call has returned and Thread B interferes and opens another FD using `open()`, now FD 1 is in use.
+                3. After Thread B opens fipe using FD 1 and Thread A calls `dup(3)`, Thread A expected FD 1 but the kernel assigns FD 4 (the lowest non-negative integer unused). This causes a problem that the user's expected redirected FD 1 but it is now FD 4. (ex: `ls > out.txt` => Thread A `write(1, 'data', len)`'s output is going to different file instead of out.txt) 
+        - Return Value
+            - On success, returns the new file descriptor. On failure, returns -1.
+
+    - `int close(int fd)`
+        - `close()` closes a file descriptor so that it no longer regers to any file and may be reused.
+        - __Reusability__: FD can be reused when opening a new file.
+        - __Resource Clearing__: If the corresponding FD was the last referencing FD to the file, the kernel clears the system resources related to the file.
+        - __File Deletion__: If `unlink()` was reserved to delete the file, the moment `close()` is called, the file is permanently deleted from the disk.
+        - __Record Lock Side Effect on Multi-Threading Environment__
+            - When a process closes a file, all locks held by that process on the file are released.
+            - Record Lock locks the specific range of the file. The range could be the whole file.
+            - The owner of the record lock is the process itself.
+                1. Process A's Thread Z opens `test.txt` with FD 3 and locks the whole file. 
+                2. Process A's Thread X opens `test.txt` with FD 4 and processes I/O operation.
+                3. After the operation, Thread Z closes FD 4.
+                4. __Result__: All locks that Process A had set via fd 3 are released.
+
+                - Why?
+                    - The owner of the record lock is the 'Process A'.
+                    - Thread Z and Thread X are in the same Process A and therefore shares the Process A's PID(TGID). In the kernel's perspective, Thread Z and Thread X shares the same TGID so it does not block Thread X. 
+                    - When Thread X closes FD 4, the kernel thinks Process A is closing FD so it releases all the locks that Process A has set. 
+
+            - Solution
+                - Use Open File Description Lock `F_OFD_SETK`. The owner of the lock is the Open File Description so it releases locks only when the corresponding FD (or copy) is closed. 
+    - `char *getcwd(char buf[size], size_t size)`
+        - Stores an absolute pathname of the current working directory of the process to `buf` and returns `buf` address. 
+        - If `buf` is `NULL`, it allocates the buffer dynamically using `malloc()`. The allocated buffer has the length `size` if `size` is bif enough to store the pathname. If 0, length is pathname len. The caller should free the memory using `free()`.
+        - Return Value
+            - On success, returns the address of `buf` storing the pathname. On failure, returns `NULL` and sets `errno`.
+        - Note: When you are working in a directory and want to return to it later
+            - Method A (string method)
+                1. Use `getcwd()` to store the current working directory.
+                2. Use `chdir()` to move to another directory.
+                3. It returns using the saved 'current working directory'.
+            - Method B (FD method)
+                1. Open the current directory (.) and obtain the number FD using `open()`.
+                2. Go to another directory and do something
+                3. use `fchdir(fd)` and come back to the current working directory
+            - Performance
+                - Method A: __Path resolution__ is needed. 
+                - Method B: It already holds a FD that directly points to the __inode__ of that directory. The kernel can "jump" immediately to that location without needing to interpret the path.
+            - Reiability
+                - Method A: If someone changes the parent directory's name, path resolution is failed because the path string value has been changed.
+                - Method B: Since the file descriptor points directly to the Inode, it can return to the current working directory despite the path name string value has been changed.
+            - Method B is faster and safer, but it consumes 1 entry on the FD table. 
+
+### Redirection __`>`__ Flow 
+1. fork(): Creates a child process
+2. open(): Open a file in the child process. A new FD (ex: 3) is assigned.
+3. dup2(3, 1): Copies the file destination pointed to by FD 3 to 1 (standard output).
+4. close(3): The copy is complete so it closes FD 3.
+5. execve(): Run `ls` program. `ls` prints the output to FD 1 as usual, but FD 1 is pointing to a file.
+
+<img src="../img/redirection-image.png" style="width: 100%;">
+
+```C
+pid = fork()    // create child process
+if (pid == 0)   // child process
+{
+    // open file. 
+    fd = open("./file",
+                 O_WRONLY | O_CREATE | O_TRUNC,
+                 S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    
+    // duplicate fd to 1
+    dup2(fd, 1);
+
+    // close fd
+    // O_CLOSEXEC can be used at open()
+    close(fd);
+
+    // execute program
+    // 'pathname' argument should be parsed before using 'execve'. Parses PATH using strtok() with :
+    execve(executable program fullpath, command args, environ);
+
+    // 'execve' function did not worked and exit with exit code 1.
+    exit(EXIT_FAILURE);
+}
+else
+{
+    // wait until the child process is complete.
+    wait(NULL);
+}
+```
+
+### Redirection __`<`__ Flow
+1. fork(): Creates a child process
+2. open(): Open a file in the child process. A new FD (ex: 3) is assigned.
+3. dup2(3, 0): Copies the file destination pointed to by FD 3 to 0 (standard input).
+4. close(3): The copy is complete so it closes FD 3.
+5. execve(): Run `cat` program. `cat` reads the data from FD 0 as usual, but FD 0 is pointing to a file, so it reads the data in the file. 
+
+### PWD
+1. The shell calls `getcwd()`.
+2. The kernel retrieves the current directory information stored in the current process's control block (PCB).
+3. Prints the retrieved path string to standard output (FD 1).
 
 
+## 3. InterProcess Communication
+### IPC
+- Allow two or more processes to exchange data
+- Two fundamental models of IPC
+
+    <img src="../img/IPC.png" style="width: 70%;">
+
+    - __Shared Memory (POSIX Shared Buffer)__
+        - Producer-Consumer Problem
+            - A producer produces information that is consumed by a consumer.
+            - A producer can fill (write) the buffer, and a consumer can empty (read) the buffer.
+            - The buffer is a shared memory that is shared by the producer and consumer processes.
+                - A process cannot approach a different process's memory space, so shared memory is needed.
+        - Problem of using Shared Memory for IPC
+            - It requires that processes share a region of memory and that the code for accessing and manipulating the shared memory be written by the application programmer.
+            - It can be solved by using Message Passing 
+    - __Message Passing (Pipes)__
+        - OS provides the means for cooperating processes to communicate with each other via a message-passing facility.
+        - Two operations of the message-passing facility
+            - `send(message)`
+            - `receive(message)`
+        - Communication Links
+            - If processes want to communicate, a communication link is needed to send data and receive data.
+            - Communication link can be implemented in a variety of ways.
+                - __direct__ or __indirect__ communication
+                - __synchronous__ and __asynchronous__ communication
+                - __automatic__ or __explicit__ buffering
+
+        <img src="../img/direct-indirect.png" style="width: 80%;">
+
+        - __Direct Communication__
+            - Each process that wants to communicate must explicitly __name__ the recipient or sender of the communication.
+                - `send(P, message)`: send a message to process P
+                - `receive(Q, message)`: receive a message from process Q
+            - Links are established __automatically__.
+            - A link is associated with __exactly two processes__
+            - There exists __exactly one link__ between each pair of processes
+        - __Indirect Communication__
+            - The messages are sent to and received from __mailboxes__ or __ports__.
+                - `send(A, message)`: send a message to mailbox A.
+                - `receive(A, message)`: receive a message from mailbox A.
+            - Mailbox (ports)
+                - An abstract object where messages can be placed by processes and messages can be removed.
+            - Links are established between a pair of processes only if __both members__ of the pair have __a shared mailbox__.
+            - A link may be associated with __more than two processes__.
+            - A number of __different links may exist__, between each pair of processes with each link corresponding to one mailbox.
+            - OS provides a mechanism that allows to process to do
+                1. __Create__ new mailbox
+                2. __Send__ and __Receive__ messages through the mailbox.
+                3. __Delete__ a mailbox
+            - Different design options for implementation
+                - __Blocking (Synchronous)__ or __Non-blocking (Asynchronous)__
+                ---
+                - __Blocking send__: the sender is blocked until the message is received.
+                - __Non-blocking send__: the sender sends the message and continue.
+                - __Blocking receive__: the receiver blocks until a message is available.
+                - __Non-blocking receive__: the receiver retrieves either a valid message or a null message
+                ---
+    - __Pipes__
+        - IPC mechanism in early UNIX systems.
+        - A __pipe__ acts as a conduit allowing two processes to communicate.
+        - __4 Issues of Pipe Implementation__
+            1. __Unidirectional__ or __Bidirectional__
+            2. __Half-Duplex__ or __Full-Duplex__
+            3. __Relationship__ between the communicating process (No relationship is required for the communicating process)
+            4. Pipes in __network__ (socket)
+        - __2 Types of Pipes__
+            - __Ordinary pipes__
+                - Cannot be accessed from outside the process that created the pipe.
+                - A parent process creates a pipe and uses it to communicate with a child process that it created.
+                - It allows two processes to communicate in __producer-consumer__ fashion.
+                    - The producer writes to one end of the pipe (write end)
+                    - The consumer reads from the other end (read end)
+                - Pipe is __unidirectional__. Two-way communication is possible by using two pipes.
+
+                <img src="../img/pipe.png" style="width: 100%;">
+
+                - __Constructing Pipes__
+                    - `pipe(int fd[])`
+                    - `fd[0]`: the read end of the pipe
+                    - `fd[1]`: the write end
+                
+                Example Code
+                ```C
+                int fd[2];
+                pid_t pid;
+
+                // create pipe
+                pipe(fd);
+
+                pid = fork()
+
+                if (pid > 0)        // parent process
+                {
+                    // close read end FD
+                    close(fd[0]);
+                    // write to the write end FD
+                    write(fd[1], message, strlen(message) + 1);
+                    // close write end FD
+                    close(fd[1]);
+                }
+                else if (pid == 0)  // child process
+                {
+                    close(fd[1]);
+                    read(fd[0], buffer, buffer_size);
+                    printf("%s\n", buffer);
+                    close(fd[0]);
+                }
+                ```
+            - __Named pipes__
+                - Can be accessed without a parent-child relationship.
+---
+### System Call
+- `int pipe(int pipefd[2])`
+    - `pipe()` creates a pipe which is unidirectional data channel for IPC. 
+    - `pipefd[2]` is used to return two FD referring to the ends of the pipe. `pipefd[0]` refers to the read end and `pipefd[1]` refers to the write end of the pipe. Data written in the write end is buffered by the kernel until it is read from read end. 
+    - On success, returns 0. On failure, -1 is returned and `errno` is set.
+
+### __|__ Flow
+1. Parent process creates pipe using `pipe()`
+2. Creates child process using `fork()`. The child process has the same FD table as parent process and therefore parent and child are pointing to the same pipe.
+3. Connect stdout and stdin to `pipefd[0]` and `pipefd[1]` using `dup2()`. 
+    - Parent process: Standard Output -> `pipefd[1]`
+    - Child process: Standard Input -> `pipefd[0]`
+4. Close unused FD using `close()`. If you do not close unused `pipefd[1]` in child process and `pipefd[0]` in parent process, parent process's `pipefd[0]` would be in infinite loop because it will wait until child process's `pipefd[1]` writes data to the pipe. `pipefd[0]` thinks the data will be sent from the pipe and wait, not being able to receive `EOF`.
+
+<img src="../img/pipe-flow.png" style="width: 100%;">
+
+### Applied to Shell Command `ls | wc -l`
+- When pipe is applied to shell command like `ls | wc -l`, 2 child processes are needed. 
+    - Shell process -> Process A, Process B.
+    1. Shell creates pipe using `pipe()`.
+    2. Shell process creates process A and process B using `fork()`.
+    3. Shell waits both processes using `waitpid()`.
+    4. Process A duplicates `pipefd[1]` to `stdout` and Process B duplicates `pipefd[0]` to `stdin`. 
+    5. A and B close unused FD using `close()`.
+    6. 
