@@ -475,7 +475,64 @@ else
     - `pipe()` creates a pipe which is unidirectional data channel for IPC. 
     - `pipefd[2]` is used to return two FD referring to the ends of the pipe. `pipefd[0]` refers to the read end and `pipefd[1]` refers to the write end of the pipe. Data written in the write end is buffered by the kernel until it is read from read end. 
     - On success, returns 0. On failure, -1 is returned and `errno` is set.
+- `pid_t waitpid(pid_t pid, int *stat_loc, int options)`
+    - Waits for the sepcific `pid` process when `pid` process becomes a specific state.
+    - `wait(&status)` = `waitpid(-1, &status, 0)`
+    - `pid_t pid`
+        - `pid > 0`: Waits for a specific process with `pid`
+        - `pid == -1`: Waits for any child.
+        - `pid == 0`: Waits for any process that is included in the same PGID (Process Group ID) as the caller process
+        - `pid < -1`: Waits for any process which PGID is `Asolute(pgid)`
+        ```
+        Negative value means PGID. Positive value means PID(TGID)
+        ```
+    - `int options`
+        - `0`: Parent process waits until the child process is dead (Blocking)
+        - `WNOHANG`: If the child process is not dead, it does not wait for the child and returns with 0 (Non-Blocking)
+        - `WUNTRACED`:It returns the status even when the child process has entered a stopped state, although it has not terminated.
+        - `WCONTINUED`: It returns the status when the child has entered continued state from stopped state.
+- `int setpgid(pid_t pid, pid_t pgid)`
+    - Sets `pid` process to `pgid` process group. 
+    
+    Args|Value|Action
+    ---|---|---
+    `pid`|0|The process ID of the calling process is used
+    `pgid`|0|The PGID of the process is made the same as its process ID
 
+    - If `setpgid()` is used to move process from one process group to another group, both groups must be part of the __same session__. The session ID of the joining group must match the session ID of the joined group.
+    - On success, returns 0. On failure, returns -1 and sets `errno`.
+
+- `int getpgid(pid_t pid)`
+    - Returns the PGID of the process specified by `pid`. If `pid = 0`, the process ID of the calling process is used.
+    - On success, returns PGID. On failure, returns -1 and sets `errno`. 
+
+---
+Section|Meaning
+---|---
+PID (Process ID)|Identifies specific process in the system
+TID (Thread ID)|Identifies specific thread in a process.
+TGID (Thread Group ID)|Identifies a thread group that groups multiple threads together to appear as a single process.
+PGID (Process Group ID)|An ID that groups multiple processes.
+- In multithreading, the main thread's TID is equal to the process's TGID
+---
+1. Process Hiearchy Structure
+    - Inheritace: A child create through `fork()` inherits its parent's process group ID. PGID is preserved across `execve`.
+    - Process ⊂ Process Group ID ⊂ Session
+2. Controlling Terminal
+    - A session can have a controlling terminal. Only one foreground process group in the session can be the owner of the controlling terminal. Other process groups are in the background.
+    - If a `SIGNAL` is generated, that signal is sent to the foreground process group. Only the foreground process group is able to read from the terminal. If other process groups try to read the terminal, `SIGTTIN` is sent to that group and suspends from reading. 
+    - `tcgetpgrp()` and `tcsetpgrp()` are used to get and set the foreground process group of the controlling terminal. 
+3. Orphan Process Group
+    - Orphan Process Group: An orphan process group refers to a case where the parents of all members of a process group are also members of that process group or members of a process group in another session. 
+        - (=> 그룹 내의 모든 멤버의 부모가 (1) 자기 자신도 그 그룹의 멤버이거나 (2) 아예 다른 세션의 멤버인 경우 = 그룹 외부에 있으면서 같은 세션에 속한 부모가 단 한 명이라도 살아있다면 고아 그룹이 아니다) 
+        - There is no parent to take care of the child group in the same session.
+    - If some process group becomes an orphan and any process in that group is stopped, `SIGHUP` is sent to each process in that group and `SIGCONT` is sent to each process.
+        Step|Kernel's Action|Process State|note
+        ---|---|---|---
+        1|Send `SIGHUP`|Stopped|`SIGHUG` is sent and processes receive but don't handle the signal
+        2|Send `SIGCONT`|Stopped -> Running|Process changes to running state
+        3|Handle `SIGHUG`|Running -> Terminated|Immediately terminated as soon as the process changes to running state.
+---
 ### __|__ Flow
 1. Parent process creates pipe using `pipe()`
 2. Creates child process using `fork()`. The child process has the same FD table as parent process and therefore parent and child are pointing to the same pipe.
@@ -494,4 +551,20 @@ else
     3. Shell waits both processes using `waitpid()`.
     4. Process A duplicates `pipefd[1]` to `stdout` and Process B duplicates `pipefd[0]` to `stdin`. 
     5. A and B close unused FD using `close()`.
-    6. 
+    6. Process A executes `ls` using `execve`. The output is sent to the write end of pipe.
+    7. Process B executes `wc` using `execve`. The input is from the read end if pipe.
+    8. Process A and B exit and return to `waitpid` of parent process.
+    
+- `setpgid()` for shell pipelining.
+    - Shell process -> Child process A, B, C....
+        
+        A, B, C, ... processes should be in the same `PGID` different from the Shell's `PGID` because The `SIGNAL` affects all the process included in the same `PGID`.
+
+- Controlling Foreground Process Group and Preventing Orphan group for Shell
+    - When `A | B | C` is performed, A, B, C is in a process group and the shell is in a different group. To handle the `SIGNAL` properly, the foreground process group should be A, B, C process group using `tcsetpgrp()`. For example, if `SIGKILL` is sent to the shell process which is the foreground process group of the controlling terminal while performing `A | B | C` in the background, the shell process is gone and there will be no shell prompt to get the user's command from the terminal. Also A, B, C group will be an orphan group.
+    
+
+
+'''C
+
+'''
