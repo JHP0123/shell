@@ -50,7 +50,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
                 SIGTERM|15|Terminate|Terminated|kill 기본 명령 (종료 요청)
                 SIGSEGV|11|Terminate + Core Dump|Terminated|잘못된 메모리 참조 (Segfault)
                 SIGSTOP|17, 19, 23|Stop (강제)|Stopped|프로세스를 즉시 정지 (무시 불가)
-                SIGTSTP|18, 20, 24|Stop,Stopped|Ctrl + Z 입력 시 (터미널 정지)
+                SIGTSTP|18, 20, 24|Stop|Stopped|Ctrl + Z 입력 시 (터미널 정지)
                 SIGCONT|19, 18, 25|Continue|Resumed|정지된 프로세스를 다시 실행
                 SIGCHLD|17, 20, 18|Ignore|(변화 없음)|자식의 상태가 변했음을 부모에 알림
 
@@ -238,7 +238,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
 
             Stage|FD 3 (original)|FD 4 (Copied)|Note
             ---|---|---|---
-            Right after `dup`|FD_CLOEXEC ON|FD_CLOEXEC OFF|When copied, thd file descriptor flags are not copied.
+            Right after `dup`|FD_CLOEXEC ON|FD_CLOEXEC OFF|When copied, the file descriptor flags are not copied.
             Call `execve`|Closed|Open (maintained)|The kernel cleans up FD 3.
             New Program|Unaccessable|Accessable|The new program has FD 4 but not FD 3.
 
@@ -286,7 +286,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
                 - Use Open File Description Lock `F_OFD_SETK`. The owner of the lock is the Open File Description so it releases locks only when the corresponding FD (or copy) is closed. 
     - `char *getcwd(char buf[size], size_t size)`
         - Stores an absolute pathname of the current working directory of the process to `buf` and returns `buf` address. 
-        - If `buf` is `NULL`, it allocates the buffer dynamically using `malloc()`. The allocated buffer has the length `size` if `size` is bif enough to store the pathname. If 0, length is pathname len. The caller should free the memory using `free()`.
+        - If `buf` is `NULL`, it allocates the buffer dynamically using `malloc()`. The allocated buffer has the length `size` if `size` is big enough to store the pathname. If 0, length is pathname len. The caller should free the memory using `free()`.
         - Return Value
             - On success, returns the address of `buf` storing the pathname. On failure, returns `NULL` and sets `errno`.
         - Note: When you are working in a directory and want to return to it later
@@ -301,7 +301,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
             - Performance
                 - Method A: __Path resolution__ is needed. 
                 - Method B: It already holds a FD that directly points to the __inode__ of that directory. The kernel can "jump" immediately to that location without needing to interpret the path.
-            - Reiability
+            - Reliability
                 - Method A: If someone changes the parent directory's name, path resolution is failed because the path string value has been changed.
                 - Method B: Since the file descriptor points directly to the Inode, it can return to the current working directory despite the path name string value has been changed.
             - Method B is faster and safer, but it consumes 1 entry on the FD table. 
@@ -554,7 +554,9 @@ PGID (Process Group ID)|An ID that groups multiple processes.
     6. Process A executes `ls` using `execve`. The output is sent to the write end of pipe.
     7. Process B executes `wc` using `execve`. The input is from the read end if pipe.
     8. Process A and B exit and return to `waitpid` of parent process.
-    
+
+<img src="../img/pipe-simualtor.png" style="width: 100%;">
+
 - `setpgid()` for shell pipelining.
     - Shell process -> Child process A, B, C....
         
@@ -563,8 +565,94 @@ PGID (Process Group ID)|An ID that groups multiple processes.
 - Controlling Foreground Process Group and Preventing Orphan group for Shell
     - When `A | B | C` is performed, A, B, C is in a process group and the shell is in a different group. To handle the `SIGNAL` properly, the foreground process group should be A, B, C process group using `tcsetpgrp()`. For example, if `SIGKILL` is sent to the shell process which is the foreground process group of the controlling terminal while performing `A | B | C` in the background, the shell process is gone and there will be no shell prompt to get the user's command from the terminal. Also A, B, C group will be an orphan group.
     
+- `setpgid()` should be executed both in parent process and child process. If the child process is scheduled by the scheduler immediately after the `fork()` call without executing `setpgid()` by the parent process, the child process is in the same PGID with the parent process and therefore cannot properly handle the SIGNAL and fore/back-ground process group (job control). 
 
 
-'''C
+```C
+pid_t groupID = 0;
+pid_t pid_arr[N];
+int count = 0;
 
-'''
+while (count < N) {
+    pid_t pid = fork();
+
+    if (pid == 0) { // --- 자식 프로세스 영역 ---
+        // 첫 번째 자식이면 스스로 리더가 되고, 아니면 groupID(첫 자식 PID)를 따름
+        if (count == 0)
+            setpgid(0, 0);
+        else
+            setpgid(0, groupID);
+
+        // 여기서 execve() 실행
+        // execve(...);
+        exit(0); 
+    } 
+    else if (pid > 0) { // --- 부모 프로세스(Shell) 영역 ---
+        pid_arr[count] = pid;
+        
+        if (count == 0) groupID = pid; // 첫 번째 자식의 PID를 그룹 ID로 결정
+
+        // 부모도 자식의 PGID 설정을 도와줌 (경쟁 상태 방지)
+        setpgid(pid, groupID);
+        
+        count++;
+    }
+}
+```
+
+## 4. Job Control
+
+Job Control is a mechanism that allows users to organically manage multiple process groups (tasks) on a single terminal and exchange terminal control among them.
+
+- Management Unit
+    - Job control operates on a 'process group' basis, not a 'process' basis.
+        - Job: If the shell commands A | B | C form of command, the kernel groups these three into a single PGID and manages them.
+        - Signal Delivery: It sends a signal to the entire PGID instead of individual PIDs.
+
+- Owner of the Terminal
+    - In one session, the terminal (keyboard, monitor) is a resource only allowed to one process group. 
+        - Foreground: A group that occupies the terminal. This group interacts with the user and receives the signal directly from the keyboard. 
+        - Background: It is a group that runs in the background without terminal privileges. When it tries to read or get an input from the terminal, ir receives `SIGTTIN` and stops.
+        - `tcsetpgrp()`: System call that sets the foreground group and hands the terminal privilage to a that foreground process group.
+
+- Signal
+
+  A small, asynchronous, standardized message(software interrupt) that notifies a running process of an event.
+
+    - Two Types of Signal
+        - Standard Signal: POSIX reliable. 
+        - Real-Time Signal: It allows for more precise control than standard signals and features the ability for signals to be stored in a queue and transmitted in sequence.
+    
+    - Signal Disposition
+        - Determining how a process behaves when a signal is delivered is called 'Disposition'. If not configured separately, it follows the default actions below.
+
+        Dispostion Name|Meaning|Example
+        ---|---|---
+        Term|Terminates the process|`SIGTERM` `SIGINT`
+        Ign|Ignores the signal and do nothing|`SIGCHLD`
+        Core|Terminates the process and produces Core Dump file| `SIGQUIT` `SIGSEGV`
+        Stop|Stops the process|`SIGTSIP` (Ctrl+Z)
+        Cont|Continues the process from stop state|`SIGCONT`
+
+    - Changing Default Dispostion using `sigaction()`, `signal()`
+        - The programmer can change the disposition into three actions using `sigaction()` and `signal()`.
+            1. Default Action: Operates the default disposition actions
+            2. Ignore: Ignores the signal
+            3. Catch(Signal Handler): A programmer-defined function is automatically invoked when the signal is delivered.
+        - `sigaction()` is more modern and portable call than `signal()`.
+
+    - Multi-Thread Environment and Stack
+        - Per-process attribute: In multithreaded programs, signal disposal settings are shared by the entire process. This means that if Thread A is configured to ignore SIGINT, it is ignored in Thread B as well.
+        - `sigaltstack`: Typically, signal handlers are executed on the existing stack. However, in special cases where a signal needs to be handled due to a stack overflow, a separate stack may be allocated to execute the handler.
+            - Ex
+                - Stack Overflow: If a program performs an infinite loop and uses all the stack memory, the kernel sends `SIGSEGV` to terminate the process.
+                - The signal handler is usually performed in the stack memory to handle the signal. But if there is no space at stack overflow, the signal handler cannot be called on stack memory. 
+                - Solution: `sigaltstack`. It asks the kernel to assign an alternative stack space for the signal handler.
+
+    - Inheritance of Signal Disposition
+        - `fork()`: The child process copies the parent process's signal dispostion congifuration. If the parent process ignores the `SIGINT`, the child process also ignores the signal. 
+
+        - `execve()`: When `execve()` is called, the child process's disposition is initialized to 'Default' action. But the 'ignore' signal stays the same.
+
+        
+
