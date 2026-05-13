@@ -5,7 +5,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
 1\. Basic Commmands|ls, mkdir, rm, mv, cp, cat, grep, wc, sort, head, nano|fork(), execve(), wait()
 2\. File I/O|>, <, pwd|fork(), open(), close(), dup2(), getcwd()
 3\. InterProcess Communicatoin|\||pipe(), I/O Redirection, IPC
-4\. Job Control|jobs, fg, bg, kill| signal, waitpid(), tcsetpgrp(), PGID
+4\. Job Control|jobs, fg, bg, kill, &| signal, waitpid(), tcsetpgrp(), PGID
 5\. Shell Built-In Commands| cd, export, set, alias, *|chdir(), getenv(), setenv(), globbing
 
 
@@ -560,7 +560,7 @@ PGID (Process Group ID)|An ID that groups multiple processes.
 - `setpgid()` for shell pipelining.
     - Shell process -> Child process A, B, C....
         
-        A, B, C, ... processes should be in the same `PGID` different from the Shell's `PGID` because The `SIGNAL` affects all the process included in the same `PGID`.
+        A, B, C, ... processes should be in the same `PGID` different from the Shell's `PGID` because The `SIGNAL` affects all the processes included in the same `PGID`.
 
 - Controlling Foreground Process Group and Preventing Orphan group for Shell
     - When `A | B | C` is performed, A, B, C is in a process group and the shell is in a different group. To handle the `SIGNAL` properly, the foreground process group should be A, B, C process group using `tcsetpgrp()`. For example, if `SIGKILL` is sent to the shell process which is the foreground process group of the controlling terminal while performing `A | B | C` in the background, the shell process is gone and there will be no shell prompt to get the user's command from the terminal. Also A, B, C group will be an orphan group.
@@ -612,8 +612,8 @@ Job Control is a mechanism that allows users to organically manage multiple proc
 - Owner of the Terminal
     - In one session, the terminal (keyboard, monitor) is a resource only allowed to one process group. 
         - Foreground: A group that occupies the terminal. This group interacts with the user and receives the signal directly from the keyboard. 
-        - Background: It is a group that runs in the background without terminal privileges. When it tries to read or get an input from the terminal, ir receives `SIGTTIN` and stops.
-        - `tcsetpgrp()`: System call that sets the foreground group and hands the terminal privilage to a that foreground process group.
+        - Background: It is a group that runs in the background without terminal privileges. When it tries to read or get an input from the terminal, it receives `SIGTTIN` and stops.
+        - `tcsetpgrp()`: System call that sets the foreground group and hands the terminal privilage to that foreground process group.
 
 - Signal
 
@@ -631,7 +631,7 @@ Job Control is a mechanism that allows users to organically manage multiple proc
         Term|Terminates the process|`SIGTERM` `SIGINT`
         Ign|Ignores the signal and do nothing|`SIGCHLD`
         Core|Terminates the process and produces Core Dump file| `SIGQUIT` `SIGSEGV`
-        Stop|Stops the process|`SIGTSIP` (Ctrl+Z)
+        Stop|Stops the process|`SIGTSTP` (Ctrl+Z)
         Cont|Continues the process from stop state|`SIGCONT`
 
     - Changing Default Dispostion using `sigaction()`, `signal()`
@@ -654,5 +654,101 @@ Job Control is a mechanism that allows users to organically manage multiple proc
 
         - `execve()`: When `execve()` is called, the child process's disposition is initialized to 'Default' action. But the 'ignore' signal stays the same.
 
-        
+### System Call
 
+- `pid_t tcgetpgrp(int fd)`
+    - Returns the process group ID of the foreground process group on the terminal associated to `fd`. `fd` must be the controlling terminal of the calling process.
+    - If there is a foreground process group of the terminal, it returns the foreground process group ID. If there is no foreground group, value larger than 1 is returned. If `fd` is not a controlling terminal of the calling process, it returns -1 and sets `errno`. 
+
+- `int tcsetpgrp(int fd, pid_t pgrp)`
+    - Makes the process group with process group ID `pgrp` the foreground process group on the terminal associated to `fd`. 
+    - The `fd` must be the controlling terminal of the calling process(`fd` should be the terminal, not an ordinary file like .txt) and must be associated with its session. `pgrp` must be a process group belonging to the same session as the calling process.
+    - If `tcsetpgrp()` is called by the background process group in its session, a `SIGTTOU` signal is sent to all members of this background process group. 
+    - On success, returns 0. On failure, returns -1 and sets `errno`.
+
+- `int kill(pid_t pid, int sig)`
+    - The `kill()` call is used to send any signal to any process group or process.
+    
+    PID Value|Note
+    ---|---
+    Positive|Sends signal to a `pid` process
+    0|Sends signal to every process in the process group of the calling process
+    -1|Sends signal to every process where the calling process has permission to send signals, execpt init(1)
+    Less than -1|Sends signal to every process in the process group whose PGID is `-pid`
+
+    - If `sig` is 0, no signal is sent. But existence and permission checks are still performed. It can check the existance of a `pid` process or `PGID` process group that the calling process is permitted to signal. 
+    - In order to have permission to send a signal, 
+        1. Sender process Real UID or Effective UID = Receiver process Real UID or Saved Set-User-ID
+        2. A process with `CAP_KILL` capability(usually the Root Process: PID = 1) is able to send a signal even though the UID is different. 
+        3. `SIGCONT` Session Match: For the `SIGCONT` signal only, signal transmission is allowed if the two processes belong to the same session, even if their UIDs are different.
+        4. If all of the above condition is not met, Rejected (`EPERM` error occurred)
+
+### Example 
+
+```bash
+$ ./analyze results01.dat
+^Z
+[1] Stopped   ./analyze results01.dat
+$ bg %1
+$ jobs
+[1] ./analyze results01.dat
+$ kill %1
+$
+```
+
+Line Number|Line|Note
+---|---|---
+1|`$ ./analyze results01.dat`|Running State, Foreground
+2|`^Z`(`SIGTSTP`)|Stopped State, Background
+3|`bg %1`(`SIGCONT`)|Running State, Background
+4|`kill %1`(`SIGTERM`)|Terminated State
+
+- Stopped vs Terminated
+
+    Division|Stopped|Terminated
+    ---|---|---
+    Cause Signal|`SIGTSTP`(Ctrl + Z), `SIGSTOP`|`SIGTERM`(kill), `SIGINT`(Ctrl + C), `SIGKILL`
+    Memory|Remained (Code and data remain intact)|Disappeared (Return all resources)
+    Resumption Possibility|You can wake it up again with `fg` or `bg`|Impossible (must run again from the beginning)
+    Shell's response|Receive `SIGCHLD` and confirm `WIFSTOPPED`|Receive `SIGCHLD` and check `WIFEXITED` or `WIFSIGNALED`
+
+### Background Process Group Clean Up Procedure
+
+1. Zombie Process
+    - After the background process calls `exit()` or completes the task, the kernel collects most of the resources such as memory. But leaves the process table entries (PID, exit status, etc.) intact.
+        - Reason: Later the parent process needs to know what child process terminated.
+        - State: The child process is a zombie process
+
+2. `SIGCHLD` signal sent
+    - The moment the child process dies, the kernel sends `SIGCHLD` signal to the parent process. The shell receives the signal and stops the execution whatever the shell was doing.
+    - The shell is in 'Wait` state which does not uses the CPU until the user enters a command to the terminal.  
+
+        1. Child Process exit: The child process has ended.
+        2. Kernel Intervene: The kenrel informs the shell process sending `SIGCHLD`
+        3. Wake up Shell: The kernel wakes the shell up.
+        4. Jump to Signal Handler: The shell stops whatever it was doing and jumps to the signal handler.
+
+3. Shell Clean Up Procedure (`waitpid()`)
+    - `SIGCHLD` handler is activated in the shell and calls `waitpid()`. When the shell cleans up the zombie process, it calls `waitpid(-1, &status, WNOHANG)` (= If there is a dead child, give the information; if not, return immediately). The shell gets the information of the zombie process's exit code and changes the child process's state in the 'Job List'.
+
+4. Informing the User
+    - The shell informs the user about the child process's state. The shell checks the 'Job List' just before the new prompt is printed to the user. 
+
+
+### Flow
+- `fg`
+    1. `fg %N`
+        - The shell finds the process group ID (PGID) of the corresponding job in the job list under management (Job List) based on the job number entered by the user (e.g., %1).
+    2. Transfer of terminal control `tcsetpgrp(STDIN_FILENO, PGID)`
+        - Keyboard input (stdin) and terminal signals (Ctrl+C, Ctrl+Z, etc.) are delivered directly to the child process group.
+    3. Process Resume
+        - Wake up the entire group by calling `kill(-target_pgid, SIGCONT)`. The shell blocks execution at this point and waits until the child terminates or stops again.
+    4. Shell Waiting `waitpid(PGID, &status, WUNTRACED)`
+        - The shell is blocked and waits until the child process enters Stopped state or Terminated state.
+    5. Reclaim terminal sovereignty and return to prompt
+        - If the child process finshes its job or enters Stopped state by Ctrl + Z, `waitpid` is returned and the shell wakes up. The shell reclaims terminal sovereignty by `tcsetpgrp(0, shell_pgid)` and renews the job list information using the information from `waitpid()`'s status code and returns to prompt. 
+
+    - When the foreground child proces enters Stopped state, the `waitpid()` returns and no more `waitpid()` is called. 
+        -  When launching a child with `fg`, the `waitpid(pid, &status, WUNTRACED)` called by the shell completes its role and returns immediately the moment the child is terminated or stopped.
+        - The stopped process is now treated as a 'Background Job' in the shell's job list. The shell no longer waits for this process in place but displays a prompt to receive other input.
+        - If the Stopeed background child process dies by `kill -9`, the `SIGCHLD` signal is sent to the shell process and jumps to signal handler and inside the handler calls `waitpid(-1, &status, WNOHANG)`.
