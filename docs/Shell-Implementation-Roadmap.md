@@ -12,7 +12,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
 ## 1. Basic Commands
 
 ### System Calls
-- Basic Commands is run by running external executable program which exists in the file system. 
+- Basic Commands are run by running external executable program which exists in the file system. 
 - The fundamental flow using specific system calls: **Fork-Exec-Wait** Cycle.
     - **fork()**: Copies the parent process and creates a child process.
         - If the shell program does not use fork call and execute basic commands using execve, the new program will overwrite the shell in memory and the shell process will end. 
@@ -105,7 +105,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
 ### 3-level File Management Structure Inside the Kernel
 - Per-Process FD Table
     - Per-Process FD Table is included in Linux's task_struct(PCB).
-    - The index is FD, and each entry hase a pointer (that points to a Wide-System Open Table) and a FD flag.
+    - The index is FD, and each entry has a pointer (that points to a Wide-System Open Table) and a FD flag.
     - Valid only within the process. (Process A's 3 and Process B's 3 can point to completely different files.)
 
 - System-wide Open File Table
@@ -264,7 +264,7 @@ Step|Related Commands|Key System Calls and Learning Keywords
             - On success, returns the new file descriptor. On failure, returns -1.
 
     - `int close(int fd)`
-        - `close()` closes a file descriptor so that it no longer regers to any file and may be reused.
+        - `close()` closes a file descriptor so that it no longer refers to any file and may be reused.
         - __Reusability__: FD can be reused when opening a new file.
         - __Resource Clearing__: If the corresponding FD was the last referencing FD to the file, the kernel clears the system resources related to the file.
         - __File Deletion__: If `unlink()` was reserved to delete the file, the moment `close()` is called, the file is permanently deleted from the disk.
@@ -646,7 +646,7 @@ Job Control is a mechanism that allows users to organically manage multiple proc
         - `sigaltstack`: Typically, signal handlers are executed on the existing stack. However, in special cases where a signal needs to be handled due to a stack overflow, a separate stack may be allocated to execute the handler.
             - Ex
                 - Stack Overflow: If a program performs an infinite loop and uses all the stack memory, the kernel sends `SIGSEGV` to terminate the process.
-                - The signal handler is usually performed in the stack memory to handle the signal. But if there is no space at stack overflow, the signal handler cannot be called on stack memory. 
+                - The signal handler is usually performed in the stack memory to handle the signal. But if there is no space at stack, the signal handler cannot be called on stack memory. 
                 - Solution: `sigaltstack`. It asks the kernel to assign an alternative stack space for the signal handler.
 
     - Inheritance of Signal Disposition
@@ -736,19 +736,95 @@ Line Number|Line|Note
 
 
 ### Flow
-- `fg`
-    1. `fg %N`
-        - The shell finds the process group ID (PGID) of the corresponding job in the job list under management (Job List) based on the job number entered by the user (e.g., %1).
-    2. Transfer of terminal control `tcsetpgrp(STDIN_FILENO, PGID)`
-        - Keyboard input (stdin) and terminal signals (Ctrl+C, Ctrl+Z, etc.) are delivered directly to the child process group.
-    3. Process Resume
-        - Wake up the entire group by calling `kill(-target_pgid, SIGCONT)`. The shell blocks execution at this point and waits until the child terminates or stops again.
-    4. Shell Waiting `waitpid(PGID, &status, WUNTRACED)`
-        - The shell is blocked and waits until the child process enters Stopped state or Terminated state.
-    5. Reclaim terminal sovereignty and return to prompt
-        - If the child process finshes its job or enters Stopped state by Ctrl + Z, `waitpid` is returned and the shell wakes up. The shell reclaims terminal sovereignty by `tcsetpgrp(0, shell_pgid)` and renews the job list information using the information from `waitpid()`'s status code and returns to prompt. 
 
-    - When the foreground child proces enters Stopped state, the `waitpid()` returns and no more `waitpid()` is called. 
-        -  When launching a child with `fg`, the `waitpid(pid, &status, WUNTRACED)` called by the shell completes its role and returns immediately the moment the child is terminated or stopped.
-        - The stopped process is now treated as a 'Background Job' in the shell's job list. The shell no longer waits for this process in place but displays a prompt to receive other input.
-        - If the Stopeed background child process dies by `kill -9`, the `SIGCHLD` signal is sent to the shell process and jumps to signal handler and inside the handler calls `waitpid(-1, &status, WNOHANG)`.
+- `&`
+    - a | b | c &가 입력이 된다.
+    - 파이프 및 자식 생성
+        - 부로 셸이 파이프를 만들고 fork()를 통해 자식을 만든다(a, b, c).
+    - 그룹 설정
+        - 부모와 자식 모두 setpgid()를 호출해서 a, b, c가 하나의 그룹으로 설정한다.
+    - 터미널 제어권 유지
+        - 부모 셸은 tcsetpgrp()를 호출하지 않는다.
+    - Job 테이블 등록
+        - 셸은 이 그룹을 내부 Job 테이블에 BACKGROUND 상태로 등록하고, 사용자가 볼 수 있게 [1] 12345를 터미널에 출력한다.
+    - 대기 생략
+        - 셸은 waitpid를 하지 않고 바로 프롬프트를 출력하여 다음 명령어 입력을 대기한다. 
+    - 비동기 수거
+        - 자식들이 백그라운드에서 일을 하다가 끝나면 부모 셸에 SIGCHLD 시그널이 가고 셸은 핸들러를 통해 비동기적으로 좀비를 수거한다.
+
+
+- `fg`
+
+    - sleep.c
+
+    ```C
+    #include <stdio.h>
+    #include <unistd.h>
+    #include <stdlib.h>
+
+    int main(int argc, char **argv)
+    {
+        int time = atoi(argv[argc - 2]);
+        int n = atoi(argv[argc - 1]);
+        printf("Start sleeping %d seconds for %d times\n", time, n);
+        for (int i = 1; i <= n; i++)
+        {
+            printf("%ith sleeping\n", i);
+            sleep(time);
+        }
+        printf("End sleeping\n");
+    }
+    ```
+    - example
+
+    ```
+    jhparkk1023@BOOK-9NBRCNK4DG:~$ ./sleep 4 4
+    Start sleeping 4 seconds for 4 times
+    1th sleeping
+    2th sleeping
+    ^Z
+    [1]+  Stopped                 ./sleep 4 4
+    jhparkk1023@BOOK-9NBRCNK4DG:~$ fg %1
+    ./sleep 4 4
+    3th sleeping
+    4th sleeping
+    End sleeping
+    jhparkk1023@BOOK-9NBRCNK4DG:~$
+    ```
+    1. Execution and Foreground Occupancy
+        - Call `fork()` to make child process and set new process group using `setpgid()`.
+        - Hand over the controlling terminal using `tcsetpgrp(0, child)` to the child process.
+        - `execve("./sleep", ...)` to execute the program.
+
+    2. 과정
+        - `fg %1` 명령어가 입력된다.
+        - Job 검색
+            - 셸은 사용자가 지정한 작업 번호(%1)를 내부 Job 테이블에서 찾아 해당 프로세스 그룹 ID(PGID)를 알아낸다
+        - 안전장치
+            - 셸이 백그라운드로 밀려나면서 `SIGTTOU` 시그널을 맞고 멈추는 것을 방지하기 위해 `signal(SIGTTOU, SIG_IGN)`을 실행한다.
+        - 터미널 제어권 양도
+            - `tcsetpgrp(tty, job_pgid)`를 한다.
+        - 재개 시그널 진송
+            - `kill(-job_pgid, SIGCONT)`를 호출하여 그룹 전체에 재개 신호를 보낸다.
+        - 안전장치 해제
+            - `signal(SIGTTOU, SIG_DFL)`로 시그널 설정을 원상복구
+        - 블로킹 대기
+            - `waitpid(-job_pgid, &status, WUNTRACED)` 루프를 돌며, 이 작업이 완전히 끝나거나 다시 Ctrl+Z로 멈출 때까지 전면에서 대기한다.
+
+- `bg`
+    - `bg %1`를 입력
+    - Job 탐색
+        - 내부 Job 테이블에서 지정된 직업의 PGID를 찾는다.
+    - 상태 변경
+        - Job 테이블에서 이 작업의 상태를 STOPPED에서 BACKGROUND로 갱신한다.
+    - 재개 시그널 전송
+        - `kill(-job_pgid, SIGCONT)`를 호출하여 멈춰있던 자식 프로세스 그룹 전체를 깨운다.
+    - 터미널 제어권 유지
+        - bg 명령어는 자식을 백그라운드에서 돌리는 것이 목적이므로, tcsetpgrp를 호출하지 않는다
+    - 프롬프트 복귀
+        - 자식들이 깨어나 백그라운드에서 독립적으로 실행되는 동안, 셸은 대기하지 않고 즉시 다음 명령어를 입력받기 위해 프롬프트를 출력
+
+### 고려사항
+
+1. custom shell 자체는 기존 shell 위에서 실행된다. custom shell 안에서 Ctrl+Z나 Ctrl+C를 하면 custom shell에서 영향을 주므로 이를 IGNORE하도록 초기에 설정해야 한다. 대신 fork 또는 execve를 할 때에는 default로 되도록 해야 한다.
+2. bg에서 실행 중이던 process가 끝나면 custom shell은 SIGCHLD를 받는다. SIGCHLD는 default가 ignore이므로 이 시그널을 처리해줄 시그널 핸들러 함수를 직접 정의해야 한다. 여기서 sigaction을 사용한다. 이 시그널 햄들러 함수 안에서 waitpid를 비동기적(WNOHANG)으로 loop 형태로 돌리면서 진행한다. 
