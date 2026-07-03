@@ -9,6 +9,8 @@ My previous 'jhpsh' shell is a simple shell that can perform cd, ls, echo. As I 
 2. High-level Design
     - Draw and blueprint the system. 
     - I will use https://excalidraw.com/ to draw a system diagram. This will help me to understand the system as a whole.
+    - Design
+        - https://excalidraw.com/#json=Jyhxa7_F_PezLuQMQEtXp,64BEWl2jArRTkxWHCsiZlA
 3. Low-level Design
     - How am I going to implement the system?
     - Fuctions, data sturctures, inputs, outputs, data flow, etc
