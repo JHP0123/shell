@@ -6,16 +6,15 @@ My previous 'jhpsh' shell is a simple shell that can perform cd, ls, echo. As I 
 ## Design Lifecycle
 1. Requirements Analysis
     - What am I going to build?
-2. High-level Design
+2. Design
     - Draw and blueprint the system. 
     - I will use https://excalidraw.com/ to draw a system diagram. This will help me to understand the system as a whole.
     - Design
         - https://excalidraw.com/#json=Jyhxa7_F_PezLuQMQEtXp,64BEWl2jArRTkxWHCsiZlA
-3. Low-level Design
-    - How am I going to implement the system?
-    - Fuctions, data sturctures, inputs, outputs, data flow, etc
-4. PoC & Debugging
-    - Literally PoC & Debugging
+3. Implementation
+    - Implement the system I designed.
+4. Debugging & Loop...
+    - Debug the system and add more features to the system.
 
- ## Requirements and Ideas
- Working on it....
+## 1st Design Drawing 
+<img src="./img/1st-design-drawing.png" style="width: 100%;">
