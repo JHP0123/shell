@@ -69,3 +69,7 @@ while(meets the end of the input (= \0)):
 
 END TOKENIZE
 ```
+
+- Result
+
+<img src="../img/lexer-result.png" style="width: 100%;">
