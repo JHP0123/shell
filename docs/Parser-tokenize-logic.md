@@ -73,3 +73,15 @@ END TOKENIZE
 - Result
 
 <img src="../img/lexer-result.png" style="width: 100%;">
+
+### 2. Parser
+- Parses tokens to commands. 
+    - Tokens -> command(argv, argc, ...)
+
+- Pipe number determines the number of command structs.
+    - A | B | C: 3 commands are created.
+
+- PIPE token을 만난 경우
+    - 이미 cmd_count(pipe + 1)만큼 Command 구조체를 만들었으므로 단순 초기화만 진행 + 다음 command 구조체 설정으로 넘어가기
+    - 이후 Pipeline struct 안의 commands 배열에 2개 이상의 요소가 존재하면 그때 pipe 연결 설정하면 됨
+    - redirection은 pipe보다 우선순위가 높으므로 pipe을 먼저 설정한 다음에 redirection을 설정하면 redirection 설정이 앞에서 미리 설정한 pipe 설정을 덮어씌우게 됨
