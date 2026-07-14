@@ -7,6 +7,7 @@
 #include <string.h>
 #include <stdio.h>
 
-void tokenize(char *input, Token **token);
+void tokenize(char *input, Token **token, int *pipe_cnt);
+Pipeline *parser(Token **tokens, int pipe_cnt);
 
 #endif

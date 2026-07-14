@@ -3,6 +3,8 @@
 
 My previous 'jhpsh' shell is a simple shell that can perform cd, ls, echo. As I worked on this project, I realized that I was just coding without the process of designing the blueprint of the whole system. In other words, in 'shell' project, before I actually implement the shell, I will go through a process of so called "Design Lifecycle".
 
+For more details for my shell, go to __docs__ directories. There you can see more...
+
 ## Design Lifecycle
 1. Requirements Analysis
     - What am I going to build?
