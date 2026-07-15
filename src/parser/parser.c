@@ -11,7 +11,21 @@ void tokenize(char *input, Token **token, int *pipe_cnt)
     int word_size = 0;
 
     if(*token == NULL)
+    {
         *token = (Token *)malloc(sizeof(Token) * capacity);
+        // if((*token) == NULL)
+        // {
+        //     perror("token malloc fail: ");
+        //     goto error_exit;
+        // }
+        
+        // 초기화
+        for(int i = 0; i < capacity; i++)
+        {
+            (*token)[i].type = null;
+            (*token)[i].value = NULL;
+        }
+    }
 
     char *curr = input;
     char *start = curr;
@@ -122,11 +136,15 @@ void tokenize(char *input, Token **token, int *pipe_cnt)
         {
             capacity += 10;
             Token *temp = (Token *)realloc(*token, sizeof(Token) * capacity);
+
+            // realloc 실패하면 모두 free
             if(temp == NULL)
             {
-                perror("realloc 실패, 메모리 free 과정 필요");
-                // 모두 free하는 과정이 필요하다
-                // free(NULL)은 safe하다
+                perror("tokenize() realloc 실패, 메모리 free");
+                for(int i = 0; i < capacity - 10; i++)
+                    free((*token)[i].value);
+                free((*token));
+                (*token) = NULL;
                 return;
             }
 
@@ -138,20 +156,23 @@ void tokenize(char *input, Token **token, int *pipe_cnt)
     {
         capacity += 10;
         Token *temp = (Token *)realloc(*token, capacity);
+
+        // realloc 실패하면 모두 free
         if(temp == NULL)
         {
-            perror("realloc 실패, 메모리 free 과정 필요");
-            // 모두 free하는 과정이 필요하다
-            // free(NULL)은 safe하다
+            perror("tokenize() realloc 실패, 메모리 free");
+            for(int i = 0; i < capacity - 10; i++)
+                free((*token)[i].value);
+            free((*token));
+            (*token) == NULL;
             return;
         }
         *token = temp;
     }
 
     // END TOKEN화 하기
-    (*token)[count].value = malloc(sizeof(char));
+    // END TOKEN은 value 값을 지정하지 않아도 됨
     (*token)[count].type = END;
-    (*token)[count].value[0] = '\0';
     count++;
 }
 
@@ -223,7 +244,9 @@ Pipeline *parser(Token **tokens, int pipe_cnt)
             ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc][0]
                     = '\0';
             capacity = 10;
+            ((*temp_pipeline).commands)[command_index].output_fd = 0;
             command_index++;
+            ((*temp_pipeline).commands)[command_index].input_fd = 0;
         }
 
         // REDIR_IN/OUT TOKEN인 경우
