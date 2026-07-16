@@ -1,28 +1,40 @@
 #include "../../include/parser.h"
 
-void tokenize(char *input, Token **token, int *pipe_cnt)
+// Token **token 동적 배열은 재사용함. main의 while을 나가면 그때가서 free
+// Token.value는 매 반복마다 free해주어야 함. 
+void tokenize(char *input, Token **token, int *pipe_cnt, int *token_capacity)
 {
+    // pipe의 개수
     *pipe_cnt = 0;
-    // 최대 토큰 수를 초과하면 realloc를 한다
-    int count = 0, capacity = 10; 
+
+    // 최대 토큰 수(token_capacity)를 초과하면 realloc를 한다
+    int count = 0;
+
     //" "안에 있는 경우 
     bool in_quote = false;
+
     // WORD TOKEN화할 때 WORD의 크기가 필요
     int word_size = 0;
 
+    // shell을 처음 실행하거나, 전 명령어에 대한 token malloc 과정에 error가 나서
+    // error_exit으로 가서 정리 과정을 거치게 되면 *token은 NULL이므로 
+    // 동적 배열 할당을 해준다
     if(*token == NULL)
     {
-        *token = (Token *)malloc(sizeof(Token) * capacity);
-        // if((*token) == NULL)
-        // {
-        //     perror("token malloc fail: ");
-        //     goto error_exit;
-        // }
-        
-        // 초기화
-        for(int i = 0; i < capacity; i++)
+        *token = (Token *)malloc(sizeof(Token) * *token_capacity);
+        for(int i = 0; i < *token_capacity; i++)
         {
             (*token)[i].type = null;
+            (*token)[i].value = NULL;
+        }
+    }
+    // 이미 *token에 배열이 할당이 되어있으면, Token.value을 free 정리해서
+    // 다음 명령어의 토큰들을 넣을 준비를 한다.
+    else if(*token != NULL)
+    {
+        for(int i = 0; i < *token_capacity; i++)
+        {
+            free((*token)[i].value);
             (*token)[i].value = NULL;
         }
     }
@@ -132,48 +144,52 @@ void tokenize(char *input, Token **token, int *pipe_cnt)
         }
 
         // count == capacity이면 realloc을 해준다.
-        if(count == capacity)
+        if(count == *token_capacity)
         {
-            capacity += 10;
-            Token *temp = (Token *)realloc(*token, sizeof(Token) * capacity);
+            *token_capacity += 10;
+            Token *temp = (Token *)realloc(*token, sizeof(Token) * *token_capacity);
 
             // realloc 실패하면 모두 free
             if(temp == NULL)
             {
                 perror("tokenize() realloc 실패, 메모리 free");
-                for(int i = 0; i < capacity - 10; i++)
+                for(int i = 0; i < *token_capacity - 10; i++)
                     free((*token)[i].value);
                 free((*token));
                 (*token) = NULL;
+                *token_capacity = 10;
                 return;
+            }
+            
+            // 새로 생긴 공간 초기화
+            for(int i = *token_capacity - 10; i < *token_capacity; i++)
+            {
+                temp[i].type = null;
+                temp[i].value = NULL;
             }
 
             *token = temp;
         }
     }
 
-    if(count >= capacity)
-    {
-        capacity += 10;
-        Token *temp = (Token *)realloc(*token, capacity);
-
-        // realloc 실패하면 모두 free
-        if(temp == NULL)
-        {
-            perror("tokenize() realloc 실패, 메모리 free");
-            for(int i = 0; i < capacity - 10; i++)
-                free((*token)[i].value);
-            free((*token));
-            (*token) == NULL;
-            return;
-        }
-        *token = temp;
-    }
-
     // END TOKEN화 하기
     // END TOKEN은 value 값을 지정하지 않아도 됨
     (*token)[count].type = END;
     count++;
+    return;
+
+// 동적 할당된 token.value 자원들 free. token 배열 자체는 재사용할거라 free X.
+// token 배열은 main의 while을 벗어나면 free함.
+error_exit:
+    if((*token) != NULL)
+    {
+        for(int i = 0; i < count; i++)
+        {
+            if((*token)[i].value != NULL)
+                free((*token)[i].value);
+        }
+    }
+    return;
 }
 
 Pipeline *parser(Token **tokens, int pipe_cnt)

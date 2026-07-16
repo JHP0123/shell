@@ -8,7 +8,7 @@
 #include <errno.h>
 
 // pipe을 생성
-int create_pipe(Pipeline *pipeline, int ***pipes);
+int create_pipe(Pipeline *pipeline, int ***pipes, int *pipe_capacity);
 
 // // child process을 생성하고, pgrp를 set해주고, Joblist에 정보 기록
 // int fork_process(Pipeline *pipeline, Joblist *joblist);

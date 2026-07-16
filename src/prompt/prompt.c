@@ -10,6 +10,7 @@ void print_prompt(char **cwd, size_t *cwd_size)
     }
     printf("%s$ ", *cwd);
     free(*cwd);
+    *cwd = NULL;
 }
 
 void get_command(char **input, size_t *input_size, ssize_t *line_size)
