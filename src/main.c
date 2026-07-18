@@ -14,7 +14,9 @@ int main()
     TokenType check_type = null;
     Token *tokens = NULL;
     int token_capacity = 10;
+
     Pipeline *pipeline = NULL;
+    int argv_capacity = 10;
 
     int pipe_cnt = -1;
     int **pipes = NULL;
@@ -32,9 +34,8 @@ int main()
         get_command(&input, &input_size, &line_size);
         if(*input == '\n')
         {
-            free(input);    // 다시 입력을 받아야 하므로 input을 free하고
-            input = NULL;   // 초기화한다
-            printf("It is a newline character\n");
+            free(input);    // 다시 입력을 받아야 하므로 input을 free하고 초기화한다
+            input = NULL;
             continue;
         }
         // - 을 입력하면 while을 빠져나가고 shell의 종료 수순으로 들어간다
@@ -48,7 +49,7 @@ int main()
         // tokenize를 실패하면 prompt를 출력하고 다시 입력을 받으러 간다
         if(tokens == NULL)
             continue;
-        
+
         // test tokenize()
         index = 0;
         check_type = tokens[index].type;
@@ -60,9 +61,66 @@ int main()
         }
         printf("tokenize test\n");
 
+        // test parser()
+        if(parser(&pipeline, &tokens, pipe_cnt) == -1)
+        {
+            printf("parser error\n");
+            continue;
+        }
+
+        for(int i = 0; i < (*pipeline).cmd_count; i++)
+        {
+            for(int j = 0; j < (*pipeline).commands[i].argc; j++)
+                printf("%s ", (*pipeline).commands[i].argv[j]);
+            printf("[argv_capacity: %d] [argc: %d] [input_fd: %d] [output_fd: %d] [redir:%d] [redir_file: %s]\n",
+                (*pipeline).commands[i].argv_capacity,
+                (*pipeline).commands[i].argc,
+                (*pipeline).commands[i].input_fd,
+                (*pipeline).commands[i].output_fd,
+                (*pipeline).commands[i].redir,
+                (*pipeline).commands[i].redir_file);
+        }
+
         // input에 새로운 입력을 받기 위해 free
         free(input);
         input = NULL;
+    }
+
+    // Pipeline 정리
+    if(pipeline != NULL)
+    {
+        if((*pipeline).commands != NULL)
+        {
+            for(int i = 0; i < (*pipeline).cmd_count; i++)
+            {
+                if((*pipeline).commands[i].argv != NULL)
+                {
+                    for(int j = 0; j < (*pipeline).commands[i].argv_capacity; j++)
+                    {
+                        // pipeline -> Pipeline -> Command -> argv -> argv[j] free
+                        if((*pipeline).commands[i].argv[j] != NULL)
+                        {
+                            free((*pipeline).commands[i].argv[j]);
+                            printf("(*pipeline).commands[%d].argv[%d] freed\n", i, j);
+                        }
+                    }
+                    // pipeline -> Pipeline -> Command -> argv free
+                    free((*pipeline).commands[i].argv);
+                    printf("(*pipeline).commands[%d].argv freed\n", i);
+                }
+                if((*pipeline).commands[i].redir_file != NULL)
+                {
+                    free((*pipeline).commands[i].redir_file);
+                    printf("(*pipeline).commands[%d].redir_file freed\n", i);
+                }
+            }
+            // pipeline -> Pipeline -> Command free
+            free((*pipeline).commands);
+            printf("(*pipeline).commands freed\n");
+        }
+        // pipeline -> Pipeline free
+        free(pipeline);
+        printf("pipeline freed\n");
     }
 
     // shell에서 명령어를 정상적으로 실행하다가 -(exit)을 하게 되면
@@ -79,7 +137,6 @@ int main()
             check_type = tokens[index].type;
         }
     }
-
     // Token tokens[] 배열 free
     free(tokens);
 

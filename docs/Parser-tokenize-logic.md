@@ -16,7 +16,7 @@
             - echo hello
             - echo "hello"
 
-    - Default size of memory allocation for Token is 10. If the input's token is bigger than 10, reallocate more memory space for the tokens.
+    - Default size of memory allocation for Token is 10. If the input's token is bigger than 10, reallocate more memory space for the tokens. 
 
 ```
 memory allocation = 10 memory space for Tokens
@@ -69,6 +69,27 @@ while(meets the end of the input (= \0)):
 
 END TOKENIZE
 ```
+- ```void tokenize(char *input, Token **token, int *pipe_cnt, int *token_capacity)```
+    - 역할
+        - input을 Token[]으로 변환
+    - 흐름
+        - 처음 shell을 실행하고 최초 명령어(input)을 입력했을 때
+            - *token = NULL, *pipe_cnt = 0, *token_capacity = 10
+            - *token에 Token[] 를 크기 *token_capacity(=10)만큼 동적할당
+            - *pipe_cnt는 나중에 parser()함수에서 사용됨. pipe_cnt + 1만큼 Command 객체를 만들어야 하기 때문
+            - Token[] 초기화
+        - 정상 명령어 입력을 계속 받을 때
+            - Token[] 메모리는 재사용
+            - 명령어 토큰 개수가 10개 이상인 경우, *token_capacity += 10을 하고 realloc
+            - Token.value(char *value)는 함수 내부에서 매번 free하고 초기화
+        - shell을 종료할 때
+            - main에서 Token.value(char *value)에 할당된 메모리 정리
+            - main에서 Token[] 메모리 정리
+        - 명령어를 입력 받았는데 tokenize() 내부에서 에러가 났을 때
+            - 함수 내부에서 Token[]과 Token.value(char *value) 메모리 정리
+
+    - 내부에서 error가 난 경우 error_exit:
+        - Token.value(char *value)와 Token[] 모두 free해서 Token -> NULL(최초상태)가 되도록 만듦
 
 - Result
 
@@ -87,3 +108,5 @@ END TOKENIZE
     - redirection은 pipe보다 우선순위가 높으므로 pipe을 먼저 설정한 다음에 redirection을 설정하면 redirection 설정이 앞에서 미리 설정한 pipe 설정을 덮어씌우게 됨
 
 <img src="../img/parser.png" style="width: 100%;">
+
+- lexer

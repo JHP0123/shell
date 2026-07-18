@@ -33,10 +33,11 @@ typedef struct
 typedef struct
 {
     char **argv;
+    int argv_capacity;  
     int argc;
     int input_fd;       // 기본: stdin
     int output_fd;      // 기본: stdout
-    int redir;         // -1: default, 0: >, 1: <
+    int redir;          // -1: default, 0: >, 1: <
     char *redir_file;
 } Command;
 

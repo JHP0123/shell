@@ -1,7 +1,12 @@
 #include "../../include/parser.h"
 
-// Token **token 동적 배열은 재사용함. main의 while을 나가면 그때가서 free
-// Token.value는 매 반복마다 free해주어야 함. 
+// 역할: 사용자의 input을 받아 token화를 한다
+// token을 받아 Token[] 배열을 동적으로 만든다. 초반에는 token은 무조건 NULL이어야 한다
+// Token[] 배열은 한번 만들면 계속 재사용한다. shell이 종료되면 main에서 마지막에 딱 한번 정리한다
+// Token.value는 매번 free한다. 
+// input은 사용자가 입력한 명령어
+// pipe_cnt는 명령어의 pipe 개수를 갱신
+// token_capacity는 default=10. 토큰이 10 이상이면 +10해서 Token[] 배열의 크기를 더 크게 재할당한다
 void tokenize(char *input, Token **token, int *pipe_cnt, int *token_capacity)
 {
     // pipe의 개수
@@ -192,28 +197,131 @@ error_exit:
     return;
 }
 
-Pipeline *parser(Token **tokens, int pipe_cnt)
+// token들을 분석해서 Command 배열로 변환
+// return: 성공하면 0, 실패하면-1
+// pipeline은 처음 실행할 때 무조건 NULL이어야 함
+int parser(Pipeline **pipeline, Token **tokens, int pipe_cnt)
 {
-    Pipeline *temp_pipeline = (Pipeline *)malloc(sizeof(Pipeline));
-    (*temp_pipeline).cmd_count = pipe_cnt + 1;
-    (*temp_pipeline).commands = (Command *)malloc(sizeof(Command) * (*temp_pipeline).cmd_count);
-    (*temp_pipeline).bg = false;
+    // 처음 shell을 실행할 때 pipeline 배열 초기화
+    if(*pipeline == NULL)
+    {
+        *pipeline = (Pipeline *)malloc(sizeof(Pipeline));
+        if(*pipeline == NULL)
+        {
+            fprintf(stderr, "Initial pipeline(NULL) memory allocation fail: %s", strerror(errno));
+            goto error_exit;
+        }
+        (*(*pipeline)).cmd_count = pipe_cnt + 1;
+        (*(*pipeline)).bg = false;
+        (*(*pipeline)).commands = (Command *)malloc(sizeof(Command) * (*(*pipeline)).cmd_count);
+        if((*(*pipeline)).commands == NULL)
+        {
+            fprintf(stderr, "Initial pipeline->commands(NULL) memory allocation fail: %s", strerror(errno));
+            goto error_exit;
+        }
 
-    size_t capacity = 10;       // pipe를 만나면 10으로 초기화
+        // Command 멤버 변수 초기화
+        for(int i = 0; i < (*(*pipeline)).cmd_count; i++)
+        {
+            (*(*pipeline)).commands[i].argv_capacity = 10;
+            (*(*pipeline)).commands[i].argv = (char **)malloc(sizeof(char *) * (*(*pipeline)).commands[i].argv_capacity);
+            if((*(*pipeline)).commands[i].argv == NULL)
+            {
+                fprintf(stderr, "pipeline->commands[%d]->argv memory allocation fail: %s", i, strerror(errno));
+                goto error_exit;
+            }
+            for(int j = 0; j < (*(*pipeline)).commands[i].argv_capacity; j++)
+                (*(*pipeline)).commands[i].argv[j] = NULL;
+            (*(*pipeline)).commands[i].argc = 0;
+            (*(*pipeline)).commands[i].input_fd = -1;
+            (*(*pipeline)).commands[i].output_fd = -1;
+            (*(*pipeline)).commands[i].redir = -1;
+            (*(*pipeline)).commands[i].redir_file = NULL;
+        }
+    }
+    // 2번째 명령어 실행 시
+    // Command[]과 argv[]은 재사용 및 크기 재설정
+    // argv[i]에 할당된 베열은 매번 free
+    else if(*pipeline != NULL)
+    {
+        (*(*pipeline)).bg = false;
+        int last_cmd_count = (*(*pipeline)).cmd_count;
+        (*(*pipeline)).cmd_count = pipe_cnt + 1;
+        // 현재 명령어의 수가 현재 명령어의 수보다 많을 때
+        // Command[] 크기 재설정 및 초기화 필요
+        if((*(*pipeline)).cmd_count > last_cmd_count)
+        {
+            Command *temp = (Command *)realloc((*(*pipeline)).commands, sizeof(Command) * (*(*pipeline)).cmd_count);
+            // 실패 시
+            if(temp == NULL)
+            {
+                fprintf(stderr, "Command[] 재할당 realloc() 실패: %s", strerror(errno));
+                goto error_exit;
+            }
+            (*(*pipeline)).commands = temp;
+
+            // 초기화
+            for(int i = 0; i < (*(*pipeline)).cmd_count; i++)
+            {
+                // 전에 할당된 Command[] 요소들 초기화
+                if(i < last_cmd_count)
+                {
+                    for(int j = 0; j <= (*(*pipeline)).commands[i].argc; j++)
+                    {
+                        free((*(*pipeline)).commands[i].argv[j]);
+                        (*(*pipeline)).commands[i].argv[j] = NULL;       
+                    }
+                    if((*(*pipeline)).commands[i].redir_file != NULL)
+                    {
+                        free((*(*pipeline)).commands[i].redir_file);
+                        (*(*pipeline)).commands[i].redir_file = NULL;
+                    }
+                }
+                // realloc으로 새로 생긴 Command[] 요소 초기화
+                else if(i >= last_cmd_count)
+                {
+                    (*(*pipeline)).commands[i].argv_capacity = 10;
+                    (*(*pipeline)).commands[i].argv = (char **)malloc(sizeof(char *) * (*(*pipeline)).commands[i].argv_capacity);
+                    if((*(*pipeline)).commands[i].argv == NULL)
+                    {
+                        fprintf(stderr, "Memory allocation for reallocted pipeline->commands->argv[%d] fail: %s", i, strerror(errno));
+                        goto error_exit;
+                    }
+                    for(int j = 0; j < (*(*pipeline)).commands[i].argv_capacity; j++)
+                        (*(*pipeline)).commands[i].argv[j] = NULL;
+                    (*(*pipeline)).commands[i].redir_file = NULL;
+                }
+                (*(*pipeline)).commands[i].argc = 0;
+                (*(*pipeline)).commands[i].input_fd = -1;
+                (*(*pipeline)).commands[i].output_fd = -1;
+                (*(*pipeline)).commands[i].redir = -1;
+            }
+        }
+        // 새로운 명령어가 이전 명령어보다 수가 적을 때 초기화 과정
+        // Command[] 배열 크기 재설정 하지 않고 멤버변수만 초기화
+        else if((*(*pipeline)).cmd_count <= last_cmd_count)
+        {
+            for(int i = 0; i < last_cmd_count; i++)
+            {
+                for(int j = 0; j <= (*(*pipeline)).commands[i].argc; j++)
+                {
+                    free((*(*pipeline)).commands[i].argv[j]);
+                    (*(*pipeline)).commands[i].argv[j] = NULL;
+                }
+                if((*(*pipeline)).commands[i].redir_file != NULL)
+                    free((*(*pipeline)).commands[i].redir_file);
+                (*(*pipeline)).commands[i].redir_file = NULL;
+                (*(*pipeline)).commands[i].argc = 0;
+                (*(*pipeline)).commands[i].input_fd = -1;
+                (*(*pipeline)).commands[i].output_fd = -1;
+                (*(*pipeline)).commands[i].redir = -1;
+            }
+        }
+    }
+
     int token_index = 0;        // token 하나를 처리하면 +1
     int command_index = 0;      // pipe을 만나면 +1
     size_t token_size = 0;
-
-    // commands 배열 초기화 작업 필요
-    for(int i = 0; i < (*temp_pipeline).cmd_count; i++)
-    {
-        ((*temp_pipeline).commands)[i].argc = 0;
-        ((*temp_pipeline).commands)[i].argv = (char **)malloc(sizeof(char *) * capacity);
-        ((*temp_pipeline).commands)[i].input_fd = -1;
-        ((*temp_pipeline).commands)[i].output_fd = -1;
-        ((*temp_pipeline).commands)[i].redir = -1;
-        ((*temp_pipeline).commands)[i].redir_file = NULL;
-    }
 
     while((*tokens)[token_index].type != END)
     {
@@ -222,47 +330,62 @@ Pipeline *parser(Token **tokens, int pipe_cnt)
         {
             // argv에 token size만큼 동적 배열
             token_size = strlen((*tokens)[token_index].value);
-            ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc] = 
-                                (char *)malloc(sizeof(char) * (token_size + 1));
+            (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] = 
+                                (char *)malloc(sizeof(char) * (token_size + 1)); // +1은 \0을 위한 것
+            if((*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] == NULL)
+            {
+                fprintf(stderr, "pipeline->commands->argv[%d] memory allocation for WORD token fail: %s",
+                        (*(*pipeline)).commands[command_index].argc,
+                        strerror(errno));
+                goto error_exit;
+            }
             
             // token string을 copy
             for(int i = 0; i < token_size; i++)
             {
-                ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc][i] =
+                (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc][i] =
                                 (*tokens)[token_index].value[i];
             }
-            ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc][token_size] = '\0';
+            (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc][token_size] = '\0';
             
             // argc + 1
-            ((*temp_pipeline).commands)[command_index].argc++;
+            (*(*pipeline)).commands[command_index].argc++;
 
-            // argc가 capacity보다 같거나 크면 realloc
-            if(((*temp_pipeline).commands)[command_index].argc >= capacity)
+            // argc가 capacity와 같으면 10만큼 더 realloc
+            if((*(*pipeline)).commands[command_index].argc == (*(*pipeline)).commands[command_index].argv_capacity)
             {
-                capacity += 10;
-                char **temp = realloc(((*temp_pipeline).commands)[command_index].argv, capacity);
-                if (temp == NULL)
+                (*(*pipeline)).commands[command_index].argv_capacity += 10;
+                char **temp = realloc((*(*pipeline)).commands[command_index].argv,
+                                sizeof(char *) * (*(*pipeline)).commands[command_index].argv_capacity);
+                if(temp == NULL)
                 {
-                    perror("realloc failed at parser()");
-                    // 모두 free하는 과정이 필요
-                    // free(NULL)은 safe하다
-                    return NULL;
+                    fprintf(stderr, "Rellocation failed at Command[%d].argv: %s", command_index, strerror(errno));
+                    goto error_exit;
                 }
-                ((*temp_pipeline).commands)[command_index].argv = temp;
+                (*(*pipeline)).commands[command_index].argv = temp;
+
+                // 재할당된 공가 초기화
+                for(int i = (*(*pipeline)).commands[command_index].argc;
+                                i < (*(*pipeline)).commands[command_index].argv_capacity;
+                                i++)
+                    (*(*pipeline)).commands[command_index].argv[i] = NULL;
             }
         }
 
         // PIPE TOKEN인 경우
         else if((*tokens)[token_index].type == PIPE)
         {
-            ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc]
-                    = (char *)malloc(sizeof(char));
-            ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc][0]
-                    = '\0';
-            capacity = 10;
-            ((*temp_pipeline).commands)[command_index].output_fd = 0;
+            (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] = (char *)malloc(sizeof(char));
+            if((*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] == NULL)
+            {
+                fprintf(stderr, "Memory allocation at pipeline->commands[%d]->argv[%d] for | token failed: %s",
+                        command_index, (*(*pipeline)).commands[command_index].argc, strerror(errno));
+                goto error_exit;
+            }
+            (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc][0] = '\0';
+            (*(*pipeline)).commands[command_index].output_fd = 0;
             command_index++;
-            ((*temp_pipeline).commands)[command_index].input_fd = 0;
+            (*(*pipeline)).commands[command_index].input_fd = 0;
         }
 
         // REDIR_IN/OUT TOKEN인 경우
@@ -270,41 +393,76 @@ Pipeline *parser(Token **tokens, int pipe_cnt)
                     ((*tokens)[token_index].type == REDIR_OUT))
         {
             if((*tokens)[token_index].type == REDIR_IN)
-                ((*temp_pipeline).commands)[command_index].redir = 1;
+                (*(*pipeline)).commands[command_index].redir = 1;
 
             else if((*tokens)[token_index].type == REDIR_OUT)
-                ((*temp_pipeline).commands)[command_index].redir = 0;
+                (*(*pipeline)).commands[command_index].redir = 0;
 
             // redirection 뒤의 file이름 token으로 옮김
             token_index++;  
             
             // filename을 redir_file로 copy
             token_size = strlen((*tokens)[token_index].value);
-            ((*temp_pipeline).commands)[command_index].redir_file =
-                        (char *)malloc(sizeof(char) * (token_size + 1));
+            (*(*pipeline)).commands[command_index].redir_file = (char *)malloc(sizeof(char) * (token_size + 1));
+            if((*(*pipeline)).commands[command_index].redir_file == NULL)
+            {
+                fprintf(stderr, "Memory allocation at pipeline->commands[%d]->redir_file failed: %s",
+                        command_index, strerror(errno));
+                goto error_exit;
+            }
 
             for(int i = 0; i < token_size; i++)
-            {
-                ((*temp_pipeline).commands)[command_index].redir_file[i] = 
-                        (*tokens)[token_index].value[i];
-            }
-            ((*temp_pipeline).commands)[command_index].redir_file[token_size] = '\0';
+                (*(*pipeline)).commands[command_index].redir_file[i] = (*tokens)[token_index].value[i];
+            (*(*pipeline)).commands[command_index].redir_file[token_size] = '\0';
         }
 
         // BG TOKEN인 경우
         else if((*tokens)[token_index].type == BG)
-        {
-            (*temp_pipeline).bg = true;
-        }
+            (*(*pipeline)).bg = true;
 
         token_index++;
     }
 
     // END TOKEN이므로 argv[argc] = NULL해주기
-    ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc]
-            = (char *)malloc(sizeof(char));
-    ((*temp_pipeline).commands)[command_index].argv[((*temp_pipeline).commands)[command_index].argc][0]
-            = '\0';
+    (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] = (char *)malloc(sizeof(char));
+    if((*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc] == NULL)
+    {
+        fprintf(stderr, "Memory allocation for END token failed: %s", strerror(errno));
+        goto error_exit;
+    }
+    (*(*pipeline)).commands[command_index].argv[(*(*pipeline)).commands[command_index].argc][0] = '\0';
 
-    return temp_pipeline;
+    return 0;
+
+error_exit:
+    if(*pipeline != NULL)
+    {
+        if((*(*pipeline)).commands != NULL)
+        {
+            for(int i = 0; i < (*(*pipeline)).cmd_count; i++)
+            {
+                if((*(*pipeline)).commands[i].argv != NULL)
+                {
+                    for(int j = 0; j < (*(*pipeline)).commands[i].argv_capacity; j++)
+                    {
+                        // *pipeline -> Pipeline -> Command -> argv -> argv[j] free
+                        if((*(*pipeline)).commands[i].argv[j] != NULL)
+                            free((*(*pipeline)).commands[i].argv[j]);
+                    }
+                    // *pipeline -> Pipeline -> Command -> argv free
+                    free((*(*pipeline)).commands[i].argv);
+                }
+                // redir_file free
+                if((*(*pipeline)).commands[i].redir_file != NULL)
+                    free((*(*pipeline)).commands[i].redir_file);
+            }
+            // *pipeline -> Pipeline -> Command free
+            free((*(*pipeline)).commands);
+        }
+        // *pipeline -> Pipeline free
+        free(*pipeline);
+        // *pipeline = NULL
+        *pipeline = NULL;
+    }
+    return -1;
 }
