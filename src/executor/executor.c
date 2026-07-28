@@ -1,43 +1,61 @@
 #include "../../include/executor.h"
 
-int create_pipe(Pipeline *pipeline, int ***pipes, int *pipe_capacity)
+int create_pipe(int ***pipes, int *pipe_cnt, int *pipe_capacity)
 {
-    // pipe의 개수
-    int pipe_cnt = (*pipeline).cmd_count - 1;
-
-    // pipe 호출을 위해 2차원 배열 [pipe_cnt][2] 생성
-    if((*pipes) == NULL)
-        (*pipes) = (int **)malloc(sizeof(int *) * *pipe_capacity);
-
-    // pipe의 개수가 *pipes에 동적할당된 요소의 개수 pipe_capacity보다 크면 10만큼 더 realloc한다
-    if(pipe_cnt > *pipe_capacity)
+    // 초기 pipes 설정. pipes 는 NULL이므로 초기 메모리 할당
+    if(*pipes == NULL)
     {
-        *pipe_capacity += 10;
-        int **temp = realloc((*pipes), sizeof(int *) * *pipe_capacity);
-        if(temp == NULL)
+        // pipe_capacity의 용량을 10을 더해도 pipe_cnt가 클 수 있으므로 pipe_capacity가 pipe_cnt보다 커질 때까지 반복
+        while(*pipe_cnt > *pipe_capacity)
+            (*pipe_capacity) += 10;
+
+        // 초기 pipes 메모리 할당
+        *pipes = (int **)malloc(sizeof(int *) * *pipe_capacity);
+        if(*pipes == NULL)
         {
-            fprintf(stderr, "[ERROR] pipes realloc failed: %s\n", strerror(errno));
+            fprintf(stderr, "Initial pipes malloc at create_pipe() failed: %s", strerror(errno));
             goto error_exit;
         }
-        (*pipes) = temp;
-    }
-    
-    if((*pipes) == NULL)
-    {
-        perror("malloc to pipes failed at create_pipe(): ");
-        goto error_exit;
-    }
-
         // 초기화
-    for(int i = 0; i < pipe_cnt; i++)
-        (*pipes)[i] = NULL;
-
-    for(int i = 0; i < pipe_cnt; i++)
+        for(int i = 0; i < *pipe_capacity; i++)
+            (*pipes)[i] = NULL;
+    }
+    // 이미 pipes 초기 설정이 된 상태
+    // pipes가 가리키는 배열 재사용
+    // pipes[i]가 가리키는 int[2] 배열은 free (free하기 전 close 필요)
+    // pipes[i]가 가리키는 int[2] 배열은 pipe_and_redirect() 함수에서 free
+    // pipes[i][j] file descriptor를 close하는 과정은 pipe_redirect() 내부에서 dup2를 할 때 진행 
+    // 아래의 pipes 초기화 과정에는 close하는 과정이 필요 없음. 이미 close와 free가 되었다고 설정
+    // **중요한 점**: create_pipe() 함수는 pipe을 생성하기 전에 pipes가 가리키는 배열의 요소들은 모두
+    //               NULL을 가리켜야 됨. 이 부분은 pipe_and_redirect() 함수에서 진행
+    else if(*pipes != NULL)
     {
-        (*pipes)[i] = (int *)malloc(sizeof(int) * 2);
+        if(*pipe_cnt > *pipe_capacity)
+        {
+            int last_pipe_capacity = *pipe_capacity;
+            while(*pipe_cnt > *pipe_capacity)
+                (*pipe_capacity) += 10;
+
+            int **temp = realloc(*pipes, sizeof(int *) * *pipe_capacity);
+            if(temp = NULL)
+            {
+                fprintf(stderr, "Realloc to pipes at create_pipe() failed: %s", strerror(errno));
+                goto error_exit;
+            }
+            (*pipes) = temp;
+            // 새로 할당된 메모리 공간 초기화
+            for(int i = last_pipe_capacity; i < *pipe_capacity; i++)
+                (*pipes)[i] = NULL;
+        }        
+    }
+
+    // pipe 배열 생성
+    for(int i = 0; i < *pipe_cnt; i++)
+    {
+        (*pipes)[i] = malloc(sizeof(int) * 2);
         if((*pipes)[i] == NULL)
         {
-            perror("malloc to pipes[i] failed at create_pipe(): ");
+            fprintf(stderr, "malloc to pipes[%d] at create_pipe failed: %s", i, strerror(errno));
             goto error_exit;
         }
         // 초기화
@@ -46,28 +64,36 @@ int create_pipe(Pipeline *pipeline, int ***pipes, int *pipe_capacity)
     }
 
     // pipe 생성
-    for(int i = 0; i < pipe_cnt; i++)
+    for(int i = 0; i < *pipe_cnt; i++)
     {
         if(pipe((*pipes)[i]) == -1)
         {
-            fprintf(stderr, "[ERROR] pipes[%d] pipe() error: %s\n", i, strerror(errno));
+            fprintf(stderr, "creating pipe at pipes[%d] failed: %s", i, strerror(errno));
             goto error_exit;
         }
     }
 
-    return pipe_cnt;
+    return 0;
 
 error_exit:
-    for(int i = 0; i < pipe_cnt; i++)
-    {
-        if((*pipes)[i][0] != -1 && (*pipes)[i][1] != -1)
+    if(*pipes != NULL)
+    {        
+        for(int i = 0; i < *pipe_cnt; i++)
         {
-            close((*pipes)[i][0]);
-            close((*pipes)[i][1]);
+            if((*pipes)[i] != NULL)
+            {
+                if((*pipes)[i][0] != -1 && (*pipes)[i][1] != -1)
+                {
+                    close((*pipes)[i][0]);
+                    close((*pipes)[i][1]);
+                }
+                free((*pipes)[i]);
+                (*pipes)[i] = NULL;
+            }
         }
-        free((*pipes)[i]);
+        free(*pipes);
+        *pipes = NULL;
     }
-    free((*pipes));
     *pipe_capacity = 10;
     return -1;
 }

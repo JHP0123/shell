@@ -109,4 +109,33 @@ END TOKENIZE
 
 <img src="../img/parser.png" style="width: 100%;">
 
-- lexer
+- ```int parser(Pipeline **pipeline, Token **tokens, int pipe_cnt)```
+    - 역할
+        - tokenize()에서 완성된 token 배열을 받아서 Pipeline->commands[] 배열을 만듦
+        - pipe이 1개 이상이면 commands[]은 2개 이상이 생김
+
+    - 흐름
+        - 처음 shell을 실행하고 첫번재 명령어를 실행할 때
+            -  *pipeline = NULL, *tokens = tokenize()로부터 할당된 배열, pipe_cnt = tokenize()로부터 얻은 pipe의 개수
+            - *pipeline에 Pipeline 객체 하나 동적 할당
+            - Pipeline.commands에 Command[cmd_count] 배열 동적 할당
+            - Pipeline.commands.argv에 (char *)[argc_capacity] 배열 동적 할당
+            - 나머지 멤버 변수 초기화
+        - 2번 이상 명령어 실행할 때
+            - Pipeline, Command[], argv[] 메모리는 재사용
+                - Command[]와 argv[]는 각각 cmd_count와 argv_capacity보다 많은 메모리가 필요하면 +10을 한 후 재할당
+            - argv의 각 요소인 char *는 재사용하지 않고 매번 free하고 초기화
+            - Command[]에 새로 할당된 메모리의 멤버변수 초기화
+        - shell을 종료한 경우
+            - *pipeline이 NULL이 될 때까지 모두 free
+
+    - parser() 내부에서 error가 발생한 경우
+        - *pipeline와 연결된 모든 메모리를 free하고 *pipeline = NULL로 초기화
+
+    - 반환값
+        - 성공: 0
+        - 실패: -1
+
+
+밑에 사진은 parser에 memory management(malloc, realloc, free) 기능이 추가된 상태를 test한 것.
+<img src="../img/parser-after-memory-management.png" style="width: 100%;">

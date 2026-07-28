@@ -35,8 +35,8 @@ typedef struct
     char **argv;
     int argv_capacity;  
     int argc;
-    int input_fd;       // 기본: stdin
-    int output_fd;      // 기본: stdout
+    int input_fd;       // 기본: stdin      (pipe을 위한 것)
+    int output_fd;      // 기본: stdout     (pipe을 위한 것)
     int redir;          // -1: default, 0: >, 1: <
     char *redir_file;
 } Command;

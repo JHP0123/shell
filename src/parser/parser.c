@@ -247,7 +247,7 @@ int parser(Pipeline **pipeline, Token **tokens, int pipe_cnt)
         (*(*pipeline)).bg = false;
         int last_cmd_count = (*(*pipeline)).cmd_count;
         (*(*pipeline)).cmd_count = pipe_cnt + 1;
-        // 현재 명령어의 수가 현재 명령어의 수보다 많을 때
+        // 현재 명령어의 수가 과거 명령어의 수보다 많을 때
         // Command[] 크기 재설정 및 초기화 필요
         if((*(*pipeline)).cmd_count > last_cmd_count)
         {
@@ -364,7 +364,7 @@ int parser(Pipeline **pipeline, Token **tokens, int pipe_cnt)
                 }
                 (*(*pipeline)).commands[command_index].argv = temp;
 
-                // 재할당된 공가 초기화
+                // 재할당된 공간 초기화
                 for(int i = (*(*pipeline)).commands[command_index].argc;
                                 i < (*(*pipeline)).commands[command_index].argv_capacity;
                                 i++)
