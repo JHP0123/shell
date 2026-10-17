@@ -95,7 +95,7 @@ END TOKENIZE
 
 <img src="../img/lexer-result.png" style="width: 100%;">
 
-### 2. Lexer
+### 2. Parser
 - Parses tokens to commands. 
     - Tokens -> command(argv, argc, ...)
 
