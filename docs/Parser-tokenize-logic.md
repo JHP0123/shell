@@ -3,7 +3,7 @@
 - Parser used in this project (shell) is designed by myself and is very simple, not error-aware. I assumed that the input(command) which the user enters to the shell's prompt is grammarly correct. 
 
 
-### 1. Lexer
+### 1. Tokenizer
 
 - Few things I considered for tokenizing inputs:
     - Blank Space: Usually, input's tokens are seperated between blank space. But |, <, > tokens do not need to be seperated by blank space but instead can be the "border token" itself.
@@ -95,7 +95,7 @@ END TOKENIZE
 
 <img src="../img/lexer-result.png" style="width: 100%;">
 
-### 2. Parser
+### 2. Lexer
 - Parses tokens to commands. 
     - Tokens -> command(argv, argc, ...)
 
